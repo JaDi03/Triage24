@@ -158,6 +158,7 @@ describe('extractFromPomXml', () => {
       name: 'com.fasterxml.jackson.core:jackson-databind',
       version: '2.15.2',
       ecosystem: 'maven',
+      direct: true,
     })
   })
 
@@ -486,5 +487,31 @@ describe('platform-specific dependencies', () => {
       packages: { 'node_modules/fsevents': { version: '1.2.9', optional: true, os: ['darwin'] } },
     })
     expect(extractFromPackageLock(lock)).toEqual([{ name: 'fsevents', version: '1.2.9', ecosystem: 'npm', os: ['darwin'] }])
+  })
+})
+
+describe('direct dependencies and manifest paths', () => {
+  it('marks npm packages declared by the root package as direct', () => {
+    const lock = JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        '': { name: 'app', dependencies: { express: '^4.18.0' } },
+        'node_modules/express': { version: '4.18.2' },
+        'node_modules/ms': { version: '2.0.0' },
+        'node_modules/express/node_modules/express': { version: '4.0.0' },
+      },
+    })
+    const deps = extractFromPackageLock(lock)
+    expect(deps.find((d) => d.name === 'express' && d.version === '4.18.2')?.direct).toBe(true)
+    expect(deps.find((d) => d.name === 'ms')?.direct).toBeUndefined()
+    expect(deps.find((d) => d.version === '4.0.0')?.direct).toBeUndefined()
+  })
+
+  it('records the manifest each dependency comes from', async () => {
+    const files: Record<string, string> = {
+      'web/package-lock.json': JSON.stringify({ lockfileVersion: 3, packages: { 'node_modules/ms': { version: '2.0.0' } } }),
+    }
+    const deps = await extractDependencies([{ path: 'web/package-lock.json', type: 'blob' }], async (p) => files[p])
+    expect(deps[0].manifestPath).toBe('web/package-lock.json')
   })
 })

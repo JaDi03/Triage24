@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { scoreCRA, type ScoreCRAParams } from '../lib/cra-scorer'
 import { depKey } from '../lib/dep-key'
-import type { GitHubTreeItem, Dependency, CVERecord, KevEntry, SastFinding } from '../types'
+import type { GitHubTreeItem, Dependency, CVERecord, KevEntry, Reachability, SastFinding } from '../types'
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -32,6 +32,24 @@ function makeCVE(
     publishedDate: '2024-01-01',
     malicious,
   }
+}
+
+function reach(verdict: Reachability['verdict']): Reachability {
+  return {
+    verdict,
+    confidence: 0.85,
+    reasoning: `static verdict: ${verdict}`,
+    evidence: [{ file: 'src/App.java', line: 32, snippet: 'log.info(user)' }],
+    method: 'static',
+    symbols: ['info'],
+    symbolSource: 'curated',
+    importCount: 1,
+    usageCount: 1,
+  }
+}
+
+function reached(cve: CVERecord, verdict: Reachability['verdict'] = 'affected'): CVERecord {
+  return { ...cve, reachability: reach(verdict) }
 }
 
 function makeKev(cveID: string): KevEntry {
@@ -102,8 +120,8 @@ describe('Security policy detection', () => {
 // ─── Art. 14(1)-(2): actively exploited vulnerabilities ──────────────────────
 
 describe('Actively exploited vulnerability (CISA KEV)', () => {
-  it('requires a report when a product dependency has a KEV-listed CVE', () => {
-    const cve = makeCVE('CVE-2021-44228', 'CRITICAL', 10)
+  it('requires a report when a product dependency has a KEV-listed CVE that the code reaches', () => {
+    const cve = reached(makeCVE('CVE-2021-44228', 'CRITICAL', 10))
     const report = score({
       deps: [DEP_A],
       cveMap: new Map([[depKey(DEP_A), [cve]]]),
@@ -136,11 +154,36 @@ describe('Actively exploited vulnerability (CISA KEV)', () => {
   it('escalates even when the CVE severity is LOW', () => {
     const report = score({
       deps: [DEP_A],
-      cveMap: new Map([[depKey(DEP_A), [makeCVE('CVE-2024-0001', 'LOW', 2.0)]]]),
+      cveMap: new Map([[depKey(DEP_A), [reached(makeCVE('CVE-2024-0001', 'LOW', 2.0))]]]),
       kevHits: [makeKev('CVE-2024-0001')],
     })
     expect(report.overallRisk).toBe('CRITICAL')
     expect(report.craStatus).toBe('report_required')
+  })
+
+  it('asks for a review when the reachability is uncertain', () => {
+    const report = score({
+      deps: [DEP_A],
+      cveMap: new Map([[depKey(DEP_A), [reached(makeCVE('CVE-2021-44228', 'CRITICAL', 10), 'uncertain')]]]),
+      kevHits: [makeKev('CVE-2021-44228')],
+    })
+    expect(report.craStatus).toBe('review_required')
+    expect(report.notifications[0].reason).toContain('Confirm whether the product is affected')
+    expect(report.deadlines).not.toBeNull()
+  })
+
+  it('indicates no notification, as an interpretation, when the code does not reach it', () => {
+    const report = score({
+      deps: [DEP_A],
+      cveMap: new Map([[depKey(DEP_A), [reached(makeCVE('CVE-2021-44228', 'CRITICAL', 10), 'not_affected')]]]),
+      kevHits: [makeKev('CVE-2021-44228')],
+    })
+    expect(report.craStatus).toBe('not_required')
+    expect(report.notifications[0].status).toBe('not_required')
+    expect(report.notifications[0].interpretation).toContain('Art. 3(40)')
+    expect(report.deadlines).toBeNull()
+    expect(report.drafts).toEqual([])
+    expect(report.overallRisk).toBe('CRITICAL')
   })
 
   it('asks for a review when the dependency is development-only', () => {
@@ -307,5 +350,54 @@ describe('Platform-specific dependencies', () => {
       cveMap: new Map([[depKey(notWindows), [makeCVE('MAL-2023-462', 'CRITICAL', null, true)]]]),
     })
     expect(report.craStatus).toBe('report_required')
+  })
+})
+
+describe('Drafts and remediations', () => {
+  it('writes the Art. 14(2) drafts for an actively exploited vulnerability', () => {
+    const report = score({
+      deps: [DEP_A],
+      cveMap: new Map([[depKey(DEP_A), [reached(makeCVE('CVE-2021-44228', 'CRITICAL', 10))]]]),
+      kevHits: [makeKev('CVE-2021-44228')],
+    })
+    expect(report.drafts).toHaveLength(1)
+    const drafts = report.drafts[0]
+    expect(drafts.category).toBe('actively_exploited_vulnerability')
+    expect(drafts.earlyWarning).toContain('Article 14(2)(a)')
+    expect(drafts.earlyWarning).toContain('CVE-2021-44228')
+    expect(drafts.earlyWarning).toContain('2026-09-27T08:00:00.000Z')
+    expect(drafts.notification).toContain('Article 14(2)(b)')
+    expect(drafts.notification).toContain('status: [PLANNED / IN PROGRESS / DONE]')
+    expect(drafts.userAdvisory).toContain('Article 14(8)')
+    expect(drafts.finalReportRule).toContain('14 days')
+  })
+
+  it('writes the Art. 14(4) drafts for a malicious release', () => {
+    const report = score({
+      deps: [DEP_B],
+      cveMap: new Map([[depKey(DEP_B), [makeCVE('CVE-2025-59144', 'HIGH', null, true)]]]),
+    })
+    expect(report.drafts[0].category).toBe('severe_incident')
+    expect(report.drafts[0].earlyWarning).toContain('unlawful or malicious acts: YES')
+    expect(report.drafts[0].finalReportRule).toContain('one month')
+  })
+
+  it('builds a Fix with IBM Bob instruction for dependencies that need action', () => {
+    const report = score({
+      deps: [DEP_A],
+      cveMap: new Map([[depKey(DEP_A), [reached(makeCVE('CVE-2021-44228', 'CRITICAL', 10))]]]),
+      kevHits: [makeKev('CVE-2021-44228')],
+    })
+    expect(report.remediations).toHaveLength(1)
+    expect(report.remediations[0].fixPrompt).toContain('lodash@4.17.0')
+    expect(report.remediations[0].fixPrompt).toContain('src/App.java:32')
+  })
+
+  it('does not suggest a fix when every vulnerability is ruled out', () => {
+    const report = score({
+      deps: [DEP_A],
+      cveMap: new Map([[depKey(DEP_A), [reached(makeCVE('CVE-2024-0001', 'HIGH'), 'not_affected')]]]),
+    })
+    expect(report.remediations).toEqual([])
   })
 })

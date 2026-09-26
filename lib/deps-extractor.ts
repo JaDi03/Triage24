@@ -5,7 +5,18 @@ import type { Dependency } from '../types'
 
 interface PackageLock {
   lockfileVersion: number
-  packages?: Record<string, { version?: string; dev?: boolean; os?: string[] }>
+  packages?: Record<
+    string,
+    {
+      version?: string
+      dev?: boolean
+      os?: string[]
+      dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+      optionalDependencies?: Record<string, string>
+      peerDependencies?: Record<string, string>
+    }
+  >
 }
 
 /** Strip UTF-8 BOM (0xFEFF) that some tools prepend to JSON files. */
@@ -33,6 +44,14 @@ export function extractFromPackageLock(content: string): Dependency[] {
   const deps: Dependency[] = []
   const seen = new Map<string, Dependency>()
 
+  // Packages the project declares itself (the lockfile's root entry).
+  const root = lock.packages[''] ?? {}
+  const declared = new Set(
+    [root.dependencies, root.devDependencies, root.optionalDependencies, root.peerDependencies].flatMap((group) =>
+      Object.keys(group ?? {}),
+    ),
+  )
+
   for (const [key, entry] of Object.entries(lock.packages)) {
     // The root package ("") has no name to extract
     if (key === '') continue
@@ -49,10 +68,13 @@ export function extractFromPackageLock(content: string): Dependency[] {
       continue
     }
 
+    // Only the top-level install of a declared package is the direct dependency.
+    const direct = declared.has(name) && key === `node_modules/${name}`
     const dep: Dependency = {
       name,
       version,
       ecosystem: 'npm',
+      ...(direct ? { direct: true } : {}),
       ...(entry.dev ? { dev: true } : {}),
       ...(Array.isArray(entry.os) && entry.os.length > 0 ? { os: entry.os } : {}),
     }
@@ -124,6 +146,7 @@ export function extractFromPomXml(content: string): Dependency[] {
       name: `${groupId}:${artifactId}`,
       version: version || 'unknown',
       ecosystem: 'maven',
+      direct: true,
       // Test-scoped artifacts are not packaged with the product.
       ...(resolve(dep.scope) === 'test' ? { dev: true } : {}),
     })
@@ -169,7 +192,8 @@ export async function extractDependencies(
 
   for (const manifest of manifests) {
     try {
-      all.push(...manifest.parse(await fetchFile(manifest.path)))
+      const parsed = manifest.parse(await fetchFile(manifest.path))
+      all.push(...parsed.map((dep) => ({ ...dep, manifestPath: manifest.path })))
     } catch (err) {
       warnings.push(
         `${manifest.path} was skipped: ${err instanceof Error ? err.message : String(err)}`,
@@ -182,8 +206,12 @@ export async function extractDependencies(
   for (const dep of all) {
     const id = `${dep.ecosystem}:${dep.name}@${dep.version}`
     const existing = byId.get(id)
-    if (!existing) byId.set(id, { ...dep })
-    else if (existing.dev && !dep.dev) delete existing.dev
+    if (!existing) {
+      byId.set(id, { ...dep })
+      continue
+    }
+    if (existing.dev && !dep.dev) delete existing.dev
+    if (dep.direct) existing.direct = true
   }
   return [...byId.values()]
 }

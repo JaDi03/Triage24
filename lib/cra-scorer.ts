@@ -7,6 +7,7 @@ import type {
   SastFinding,
   CRAReport,
 } from '@/types'
+import { depKey } from '@/lib/dep-key'
 
 // ─── SBOM / Policy detection patterns ────────────────────────────────────────
 
@@ -54,10 +55,14 @@ export interface ScoreCRAParams {
   cveMap: Map<string, CVERecord[]>
   kevHits: KevEntry[]
   sastFindings: SastFinding[]
+  /** Dependencies whose version could not be resolved; they were not checked. */
+  unresolvedDeps?: Dependency[]
+  /** Non-fatal problems found during the analysis. */
+  warnings?: string[]
 }
 
 export function scoreCRA(params: ScoreCRAParams): CRAReport {
-  const { repoUrl, tree, deps, cveMap, kevHits, sastFindings } = params
+  const { repoUrl, tree, deps, cveMap, kevHits, sastFindings, unresolvedDeps = [], warnings = [] } = params
 
   // ── Artifact detection ──────────────────────────────────────────────────────
   const hasSbom = hasSBOM(tree)
@@ -69,13 +74,15 @@ export function scoreCRA(params: ScoreCRAParams): CRAReport {
   const cveFindings: CRAReport['cveFindings'] = []
 
   for (const dep of deps) {
-    const cves = cveMap.get(dep.name) ?? []
+    const cves = cveMap.get(depKey(dep)) ?? []
     if (cves.length > 0) {
       cveFindings.push({ dep, cves })
     }
     for (const cve of cves) {
-      if (kevIdSet.has(cve.cveId)) {
-        const kev = kevHits.find((k) => k.cveID === cve.cveId)!
+      // A merged finding can carry several CVE IDs; any of them may be in KEV.
+      const kevId = cve.aliases.find((id) => kevIdSet.has(id))
+      if (kevId) {
+        const kev = kevHits.find((k) => k.cveID === kevId)!
         kevFindings.push({ dep, cve, kev })
       }
     }
@@ -126,5 +133,7 @@ export function scoreCRA(params: ScoreCRAParams): CRAReport {
     kevFindings,
     cveFindings,
     sastFindings,
+    unresolvedDeps: unresolvedDeps.map((d) => d.name),
+    warnings,
   }
 }

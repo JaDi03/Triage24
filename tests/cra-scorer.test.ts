@@ -1,5 +1,6 @@
 ﻿import { describe, it, expect } from 'vitest'
 import { scoreCRA } from '../lib/cra-scorer'
+import { depKey } from '../lib/dep-key'
 import type {
   GitHubTreeItem,
   Dependency,
@@ -26,10 +27,13 @@ function makeCVE(
 ): CVERecord {
   return {
     cveId,
+    osvIds: [`GHSA-test-${cveId}`],
+    aliases: [cveId, `GHSA-test-${cveId}`],
     description: `Test ${cveId}`,
     cvssScore,
     severity,
     publishedDate: '2024-01-01',
+    malicious: false,
   }
 }
 
@@ -197,7 +201,7 @@ describe('KEV escalation (CRA Article 14 early warning)', () => {
       repoUrl: REPO_URL,
       tree: [],
       deps: [DEP_A],
-      cveMap: new Map([[DEP_A.name, [cve]]]),
+      cveMap: new Map([[depKey(DEP_A), [cve]]]),
       kevHits: [kev],
       sastFindings: [],
     })
@@ -213,7 +217,7 @@ describe('KEV escalation (CRA Article 14 early warning)', () => {
       repoUrl: REPO_URL,
       tree: [],
       deps: [DEP_A],
-      cveMap: new Map([[DEP_A.name, [cve]]]),
+      cveMap: new Map([[depKey(DEP_A), [cve]]]),
       kevHits: [kev],
       sastFindings: [],
     })
@@ -229,7 +233,7 @@ describe('KEV escalation (CRA Article 14 early warning)', () => {
       repoUrl: REPO_URL,
       tree: [],
       deps: [DEP_A],
-      cveMap: new Map([[DEP_A.name, [cve]]]),
+      cveMap: new Map([[depKey(DEP_A), [cve]]]),
       kevHits: [makeKev('CVE-2024-0001')],
       sastFindings: [],
     })
@@ -243,7 +247,7 @@ describe('KEV escalation (CRA Article 14 early warning)', () => {
       repoUrl: REPO_URL,
       tree: [],
       deps: [DEP_A],
-      cveMap: new Map([[DEP_A.name, [cve]]]),
+      cveMap: new Map([[depKey(DEP_A), [cve]]]),
       kevHits: [makeKev('CVE-2024-9999')], // different CVE ID
       sastFindings: [],
     })
@@ -263,7 +267,7 @@ describe('CVE severity escalation (no KEV)', () => {
       repoUrl: REPO_URL,
       tree: [],
       deps: [DEP_A],
-      cveMap: new Map([[DEP_A.name, [cve]]]),
+      cveMap: new Map([[depKey(DEP_A), [cve]]]),
       kevHits: [],
       sastFindings: [],
     })
@@ -278,7 +282,7 @@ describe('CVE severity escalation (no KEV)', () => {
       repoUrl: REPO_URL,
       tree: [],
       deps: [DEP_A],
-      cveMap: new Map([[DEP_A.name, [cve]]]),
+      cveMap: new Map([[depKey(DEP_A), [cve]]]),
       kevHits: [],
       sastFindings: [],
     })
@@ -293,7 +297,7 @@ describe('CVE severity escalation (no KEV)', () => {
       repoUrl: REPO_URL,
       tree: [],
       deps: [DEP_A],
-      cveMap: new Map([[DEP_A.name, [cve]]]),
+      cveMap: new Map([[depKey(DEP_A), [cve]]]),
       kevHits: [],
       sastFindings: [],
     })
@@ -308,7 +312,7 @@ describe('CVE severity escalation (no KEV)', () => {
       repoUrl: REPO_URL,
       tree: [],
       deps: [DEP_A],
-      cveMap: new Map([[DEP_A.name, [cve]]]),
+      cveMap: new Map([[depKey(DEP_A), [cve]]]),
       kevHits: [],
       sastFindings: [],
     })
@@ -325,8 +329,8 @@ describe('CVE severity escalation (no KEV)', () => {
       tree: [],
       deps: [DEP_A, DEP_B],
       cveMap: new Map([
-        [DEP_A.name, [cveLow]],
-        [DEP_B.name, [cveCrit]],
+        [depKey(DEP_A), [cveLow]],
+        [depKey(DEP_B), [cveCrit]],
       ]),
       kevHits: [],
       sastFindings: [],
@@ -462,7 +466,7 @@ describe('cveFindings structure', () => {
       repoUrl: REPO_URL,
       tree: [],
       deps: [DEP_A],
-      cveMap: new Map([[DEP_A.name, [cve1, cve2]]]),
+      cveMap: new Map([[depKey(DEP_A), [cve1, cve2]]]),
       kevHits: [],
       sastFindings: [],
     })
@@ -477,7 +481,7 @@ describe('cveFindings structure', () => {
       repoUrl: REPO_URL,
       tree: [],
       deps: [DEP_A, DEP_B],
-      cveMap: new Map([[DEP_A.name, [cve]]]),
+      cveMap: new Map([[depKey(DEP_A), [cve]]]),
       kevHits: [],
       sastFindings: [],
     })

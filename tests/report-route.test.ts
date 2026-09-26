@@ -18,6 +18,8 @@ const MOCK_REPORT: CRAReport = {
   kevFindings: [],
   cveFindings: [],
   sastFindings: [],
+  unresolvedDeps: [],
+  warnings: [],
 }
 
 function makeGetRequest(id: string): [NextRequest, { params: Promise<{ id: string }> }] {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { parseRepoUrl, fetchRepoTree, fetchFileContent, GithubError } from '@/lib/github'
 import { extractDependencies } from '@/lib/deps-extractor'
 import { lookupCVEsBatch } from '@/lib/osv'
+import { hasResolvedVersion } from '@/lib/dep-key'
 import { downloadKevCatalog, matchKev } from '@/lib/kev'
 import { scanRepo } from '@/lib/sast'
 import { scoreCRA } from '@/lib/cra-scorer'
@@ -62,12 +63,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     fetchFileContent(owner, repo, path),
   )
 
-  // 5. Lookup CVEs via OSV.dev
-  const cveMap = await lookupCVEsBatch(deps)
+  // 5. Lookup CVEs via OSV.dev (dependencies with an unresolved version are not queried)
+  const unresolvedDeps = deps.filter((d) => !hasResolvedVersion(d))
+  const { byDependency: cveMap, warnings } = await lookupCVEsBatch(deps)
 
-  // 6. Cross-reference with CISA KEV
+  // 6. Cross-reference with CISA KEV, using every CVE alias of each finding
   const kevCatalog = await downloadKevCatalog()
-  const allCveIds = [...cveMap.values()].flat().map((c) => c.cveId)
+  const allCveIds = [...cveMap.values()]
+    .flat()
+    .flatMap((c) => c.aliases.filter((id) => id.startsWith('CVE-')))
   const kevHits = matchKev(allCveIds, kevCatalog)
 
   // 7. SAST analysis — fetch code files < 500 KB
@@ -96,7 +100,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   )
 
   // 8. Score CRA
-  const report = scoreCRA({ repoUrl: url, tree, deps, cveMap, kevHits, sastFindings })
+  const report = scoreCRA({
+    repoUrl: url,
+    tree,
+    deps,
+    cveMap,
+    kevHits,
+    sastFindings,
+    unresolvedDeps,
+    warnings,
+  })
 
   // 9. Cache and respond
   reportCache.set(report.reportId, report)

@@ -83,7 +83,7 @@ export default function DepsTable({ cveFindings, kevFindings }: Props) {
                   </span>
                 </td>
                 <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
-                  {row.cve.cvssScore.toFixed(1)}
+                  {row.cve.cvssScore !== null ? row.cve.cvssScore.toFixed(1) : '—'}
                 </td>
                 <td className="px-4 py-3">
                   {row.isKev ? (

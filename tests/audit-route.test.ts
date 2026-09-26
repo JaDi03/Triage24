@@ -67,6 +67,8 @@ const MOCK_REPORT: CRAReport = {
   kevFindings: [],
   cveFindings: [],
   sastFindings: [],
+  unresolvedDeps: [],
+  warnings: [],
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -84,7 +86,7 @@ function setupHappyPath() {
   vi.mocked(fetchRepoTree).mockResolvedValue(MOCK_TREE)
   vi.mocked(fetchFileContent).mockResolvedValue('{}')
   vi.mocked(extractDependencies).mockResolvedValue([])
-  vi.mocked(lookupCVEsBatch).mockResolvedValue(new Map())
+  vi.mocked(lookupCVEsBatch).mockResolvedValue({ byDependency: new Map(), warnings: [] })
   vi.mocked(downloadKevCatalog).mockResolvedValue([])
   vi.mocked(matchKev).mockReturnValue([])
   vi.mocked(scanRepo).mockReturnValue([])
@@ -127,7 +129,7 @@ describe('POST /api/audit', () => {
 
     vi.mocked(fetchRepoTree).mockImplementation(async () => { order.push('fetchRepoTree'); return MOCK_TREE })
     vi.mocked(extractDependencies).mockImplementation(async () => { order.push('extractDependencies'); return [] })
-    vi.mocked(lookupCVEsBatch).mockImplementation(async () => { order.push('lookupCVEsBatch'); return new Map() })
+    vi.mocked(lookupCVEsBatch).mockImplementation(async () => { order.push('lookupCVEsBatch'); return { byDependency: new Map(), warnings: [] } })
     vi.mocked(downloadKevCatalog).mockImplementation(async () => { order.push('downloadKevCatalog'); return [] })
     vi.mocked(scanRepo).mockImplementation(() => { order.push('scanRepo'); return [] })
     vi.mocked(scoreCRA).mockImplementation(() => { order.push('scoreCRA'); return MOCK_REPORT })
@@ -251,7 +253,7 @@ describe('POST /api/audit', () => {
     vi.mocked(fetchRepoTree).mockResolvedValue(largeTree)
     vi.mocked(fetchFileContent).mockResolvedValue('// code')
     vi.mocked(extractDependencies).mockResolvedValue([])
-    vi.mocked(lookupCVEsBatch).mockResolvedValue(new Map())
+    vi.mocked(lookupCVEsBatch).mockResolvedValue({ byDependency: new Map(), warnings: [] })
     vi.mocked(downloadKevCatalog).mockResolvedValue([])
     vi.mocked(matchKev).mockReturnValue([])
     vi.mocked(scanRepo).mockReturnValue([])

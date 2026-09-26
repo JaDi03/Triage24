@@ -15,11 +15,19 @@ export interface Dependency {
 }
 
 export interface CVERecord {
+  /** Display ID: the CVE when one exists, otherwise the OSV ID (GHSA-..., MAL-...). */
   cveId: string
+  /** OSV records merged into this finding (advisories that are aliases of each other). */
+  osvIds: string[]
+  /** Every known identifier of the issue (CVE, GHSA, MAL...), cveId included. */
+  aliases: string[]
   description: string
-  cvssScore: number
+  /** CVSS v3 base score computed from the vector; null when OSV provides no CVSS v3 vector. */
+  cvssScore: number | null
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE'
   publishedDate: string
+  /** The release contains malicious code (OSV MAL-* record or CWE-506). */
+  malicious: boolean
 }
 
 export interface KevEntry {
@@ -56,4 +64,8 @@ export interface CRAReport {
   kevFindings: Array<{ dep: Dependency; cve: CVERecord; kev: KevEntry }>
   cveFindings: Array<{ dep: Dependency; cves: CVERecord[] }>
   sastFindings: SastFinding[]
+  /** Dependencies whose version could not be resolved (for example a Maven version set by a parent POM); not checked. */
+  unresolvedDeps: string[]
+  /** Non-fatal problems found during the analysis. */
+  warnings: string[]
 }

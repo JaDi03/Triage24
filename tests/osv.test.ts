@@ -1,28 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { buildOsvQuery, lookupCVEsBatch, clearOsvCache } from '@/lib/osv'
+import { depKey } from '@/lib/dep-key'
 import type { Dependency } from '@/types'
+import { recordedFetch } from './helpers/osv-fixtures'
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
+const log4jDep: Dependency = { name: 'org.apache.logging.log4j:log4j-core', version: '2.14.1', ecosystem: 'maven' }
+const debugDep: Dependency = { name: 'debug', version: '4.4.2', ecosystem: 'npm' }
 const lodashDep: Dependency = { name: 'lodash', version: '4.17.20', ecosystem: 'npm' }
 const expressDep: Dependency = { name: 'express', version: '4.18.2', ecosystem: 'npm' }
-const mavenDep: Dependency = { name: 'org.apache.logging.log4j:log4j-core', version: '2.14.1', ecosystem: 'maven' }
-
-const lodashVuln = {
-  id: 'GHSA-xxxx-1111',
-  aliases: ['CVE-2021-23337'],
-  summary: 'Prototype pollution in lodash',
-  published: '2021-02-15T00:00:00Z',
-  severity: [{ type: 'CVSS_V3', score: '7.2' }],
-}
-
-const log4jVuln = {
-  id: 'GHSA-yyyy-2222',
-  aliases: ['CVE-2021-44228'],
-  summary: 'Log4Shell RCE vulnerability',
-  published: '2021-12-10T00:00:00Z',
-  severity: [{ type: 'CVSS_V3', score: '10.0' }],
-}
 
 // ─── buildOsvQuery ────────────────────────────────────────────────────────────
 
@@ -41,7 +28,7 @@ describe('buildOsvQuery', () => {
   })
 
   it('normalises "maven" to "Maven" for OSV', () => {
-    const result = buildOsvQuery([mavenDep])
+    const result = buildOsvQuery([log4jDep])
     expect(result.queries[0].package.ecosystem).toBe('Maven')
   })
 
@@ -51,190 +38,130 @@ describe('buildOsvQuery', () => {
   })
 })
 
-// ─── lookupCVEsBatch ─────────────────────────────────────────────────────────
+// ─── lookupCVEsBatch with recorded OSV responses ─────────────────────────────
 
 describe('lookupCVEsBatch', () => {
+  let fetchMock: ReturnType<typeof recordedFetch>
+
   beforeEach(() => {
-    vi.restoreAllMocks()
     vi.unstubAllGlobals()
     clearOsvCache()
+    fetchMock = recordedFetch()
+    vi.stubGlobal('fetch', fetchMock)
   })
 
-  function mockFetch(responseBody: object, ok = true) {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok,
-        status: ok ? 200 : 500,
-        statusText: ok ? 'OK' : 'Internal Server Error',
-        json: async () => responseBody,
-      }),
-    )
-  }
+  it('resolves the CVE ID and severity of Log4Shell from the full OSV record', async () => {
+    const { byDependency, warnings } = await lookupCVEsBatch([log4jDep])
+    const findings = byDependency.get(depKey(log4jDep))!
 
-  // ── happy path: one dep with one CVE ──────────────────────────────────────
-
-  it('returns CVEs for a dependency that has vulnerabilities', async () => {
-    mockFetch({ results: [{ vulns: [lodashVuln] }] })
-
-    const map = await lookupCVEsBatch([lodashDep])
-    const cves = map.get('lodash@4.17.20')
-
-    expect(cves).toHaveLength(1)
-    expect(cves![0].cveId).toBe('CVE-2021-23337')
-    expect(cves![0].description).toBe('Prototype pollution in lodash')
-    expect(cves![0].cvssScore).toBe(7.2)
-    expect(cves![0].severity).toBe('HIGH')
-    expect(cves![0].publishedDate).toBe('2021-02-15T00:00:00Z')
+    const log4shell = findings.find((f) => f.cveId === 'CVE-2021-44228')
+    expect(log4shell).toBeDefined()
+    expect(log4shell!.osvIds).toEqual(['GHSA-jfh8-c2jp-5v3q'])
+    expect(log4shell!.cvssScore).toBe(10)
+    expect(log4shell!.severity).toBe('CRITICAL')
+    expect(log4shell!.malicious).toBe(false)
+    expect(warnings).toEqual([])
   })
 
-  // ── no vulnerabilities ───────────────────────────────────────────────────
-
-  it('returns an empty array for a dependency with no vulnerabilities', async () => {
-    mockFetch({ results: [{ vulns: [] }] })
-
-    const map = await lookupCVEsBatch([expressDep])
-    expect(map.get('express@4.18.2')).toEqual([])
+  it('finds CVE-2021-45046, the second Log4j CVE in KEV', async () => {
+    const { byDependency } = await lookupCVEsBatch([log4jDep])
+    const finding = byDependency.get(depKey(log4jDep))!.find((f) => f.cveId === 'CVE-2021-45046')
+    expect(finding?.severity).toBe('CRITICAL')
+    expect(finding?.cvssScore).toBe(9)
   })
 
-  it('returns an empty array when OSV omits the vulns field', async () => {
-    mockFetch({ results: [{}] })
-
-    const map = await lookupCVEsBatch([expressDep])
-    expect(map.get('express@4.18.2')).toEqual([])
+  it('uses the advisory severity label when only a CVSS v4 vector is available', async () => {
+    const { byDependency } = await lookupCVEsBatch([log4jDep])
+    const finding = byDependency.get(depKey(log4jDep))!.find((f) => f.cveId === 'CVE-2026-34480')
+    expect(finding?.cvssScore).toBeNull()
+    expect(finding?.severity).toBe('MEDIUM')
   })
 
-  // ── multiple deps in one batch ───────────────────────────────────────────
+  it('merges the GHSA and MAL records of debug 4.4.2 into one malicious finding', async () => {
+    const { byDependency } = await lookupCVEsBatch([debugDep])
+    const findings = byDependency.get(depKey(debugDep))!
 
-  it('handles a mixed batch (npm + maven) in one request', async () => {
-    mockFetch({
-      results: [
-        { vulns: [lodashVuln] },
-        { vulns: [log4jVuln] },
-      ],
+    expect(findings).toHaveLength(1)
+    expect(findings[0].malicious).toBe(true)
+    expect(findings[0].cveId).toBe('CVE-2025-59144')
+    expect(findings[0].osvIds).toEqual(['GHSA-4x49-vf9v-38px', 'MAL-2025-46974'])
+    expect(findings[0].aliases).toContain('MAL-2025-46974')
+  })
+
+  it('merges lodash advisories that are aliases of each other (5 records, 3 issues)', async () => {
+    const { byDependency } = await lookupCVEsBatch([lodashDep])
+    const findings = byDependency.get(depKey(lodashDep))!
+
+    expect(findings).toHaveLength(3)
+    const commandInjection = findings.find((f) => f.aliases.includes('CVE-2021-23337'))!
+    expect(commandInjection.osvIds).toEqual(['GHSA-35jh-r3h4-6jhm', 'GHSA-r5fr-rjxr-66jc'])
+    // The highest score of the merged records (7.2 and 8.1).
+    expect(commandInjection.cvssScore).toBe(8.1)
+  })
+
+  it('keys results by ecosystem, name and version', async () => {
+    const { byDependency } = await lookupCVEsBatch([lodashDep, expressDep])
+    expect([...byDependency.keys()].sort()).toEqual(['npm:express@4.18.2', 'npm:lodash@4.17.20'])
+    expect(byDependency.get('npm:express@4.18.2')).toEqual([])
+  })
+
+  it('does not query dependencies whose version is unresolved', async () => {
+    const unresolved: Dependency = { name: 'org.springframework.boot:spring-boot-starter-web', version: 'unknown', ecosystem: 'maven' }
+    const { byDependency } = await lookupCVEsBatch([unresolved])
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(byDependency.size).toBe(0)
+  })
+
+  it('serves repeated lookups from the cache', async () => {
+    await lookupCVEsBatch([log4jDep])
+    const calls = fetchMock.mock.calls.length
+    await lookupCVEsBatch([log4jDep])
+    expect(fetchMock.mock.calls.length).toBe(calls)
+  })
+
+  it('keeps the finding and adds a warning when an advisory cannot be fetched', async () => {
+    const failing = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes('/v1/vulns/')) return new Response('boom', { status: 500, statusText: 'Internal Server Error' })
+      return fetchMock(input, init)
     })
+    vi.stubGlobal('fetch', failing)
 
-    const map = await lookupCVEsBatch([lodashDep, mavenDep])
-
-    expect(fetch).toHaveBeenCalledOnce()
-    expect(map.get('lodash@4.17.20')![0].cveId).toBe('CVE-2021-23337')
-    expect(map.get('org.apache.logging.log4j:log4j-core@2.14.1')![0].cveId).toBe('CVE-2021-44228')
+    const { byDependency, warnings } = await lookupCVEsBatch([debugDep])
+    expect(byDependency.get(depKey(debugDep))!.length).toBeGreaterThan(0)
+    expect(warnings.some((w) => w.includes('MAL-2025-46974'))).toBe(true)
   })
 
-  it('sends a single POST request regardless of dep count', async () => {
-    mockFetch({ results: [{ vulns: [] }, { vulns: [] }] })
-
-    await lookupCVEsBatch([lodashDep, expressDep])
-    expect(fetch).toHaveBeenCalledOnce()
-
-    const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(url).toBe('https://api.osv.dev/v1/querybatch')
-    expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body).queries).toHaveLength(2)
+  it('throws when the OSV batch endpoint fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503, statusText: 'Service Unavailable' })))
+    await expect(lookupCVEsBatch([lodashDep])).rejects.toThrow(/OSV\.dev batch API error: 503/)
   })
 
-  // ── severity mapping ─────────────────────────────────────────────────────
+  it('splits more than 1000 dependencies into several querybatch requests', async () => {
+    const many: Dependency[] = Array.from({ length: 1001 }, (_, i) => ({ name: `pkg-${i}`, version: '1.0.0', ecosystem: 'npm' }))
+    await lookupCVEsBatch(many)
 
-  it('maps CVSS 10.0 to CRITICAL severity', async () => {
-    mockFetch({ results: [{ vulns: [log4jVuln] }] })
-
-    const map = await lookupCVEsBatch([mavenDep])
-    const cve = map.get('org.apache.logging.log4j:log4j-core@2.14.1')![0]
-    expect(cve.severity).toBe('CRITICAL')
-    expect(cve.cvssScore).toBe(10.0)
+    const batchCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/querybatch'))
+    expect(batchCalls).toHaveLength(2)
+    expect(JSON.parse(String(batchCalls[0][1]!.body)).queries).toHaveLength(1000)
+    expect(JSON.parse(String(batchCalls[1][1]!.body)).queries).toHaveLength(1)
   })
 
-  it('maps CVSS 4.0 to MEDIUM severity', async () => {
-    const vuln = { ...lodashVuln, severity: [{ type: 'CVSS_V3', score: '4.0' }] }
-    mockFetch({ results: [{ vulns: [vuln] }] })
+  it('follows next_page_token for paginated results', async () => {
+    const paged = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/querybatch')) {
+        const { queries } = JSON.parse(String(init?.body))
+        if (queries[0].page_token === 'page-2') {
+          return Response.json({ results: [{ vulns: [{ id: 'GHSA-p6xc-xr62-6r2g' }] }] })
+        }
+        return Response.json({ results: [{ vulns: [{ id: 'GHSA-jfh8-c2jp-5v3q' }], next_page_token: 'page-2' }] })
+      }
+      return fetchMock(input, init)
+    })
+    vi.stubGlobal('fetch', paged)
 
-    const map = await lookupCVEsBatch([lodashDep])
-    expect(map.get('lodash@4.17.20')![0].severity).toBe('MEDIUM')
-  })
-
-  it('maps missing severity to NONE with cvssScore 0', async () => {
-    const vuln = { id: 'GHSA-no-score', aliases: ['CVE-2020-0001'], summary: 'No CVSS' }
-    mockFetch({ results: [{ vulns: [vuln] }] })
-
-    const map = await lookupCVEsBatch([lodashDep])
-    const cve = map.get('lodash@4.17.20')![0]
-    expect(cve.severity).toBe('NONE')
-    expect(cve.cvssScore).toBe(0)
-  })
-
-  // ── CVE alias fallback ───────────────────────────────────────────────────
-
-  it('falls back to OSV ID when no CVE alias exists', async () => {
-    const vuln = { id: 'GHSA-only-1234', summary: 'No CVE alias' }
-    mockFetch({ results: [{ vulns: [vuln] }] })
-
-    const map = await lookupCVEsBatch([lodashDep])
-    expect(map.get('lodash@4.17.20')![0].cveId).toBe('GHSA-only-1234')
-  })
-
-  // ── module-level cache ───────────────────────────────────────────────────
-
-  it('returns cached results without making a second HTTP call', async () => {
-    mockFetch({ results: [{ vulns: [lodashVuln] }] })
-
-    // First call — populates cache.
-    await lookupCVEsBatch([lodashDep])
-    // Second call — should hit cache.
-    const map2 = await lookupCVEsBatch([lodashDep])
-
-    expect(fetch).toHaveBeenCalledOnce()
-    expect(map2.get('lodash@4.17.20')![0].cveId).toBe('CVE-2021-23337')
-  })
-
-  it('only requests uncached deps in a subsequent batch call', async () => {
-    // Use a single spy with two sequential responses.
-    const fetchSpy = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-        json: async () => ({ results: [{ vulns: [lodashVuln] }] }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-        json: async () => ({ results: [{ vulns: [] }] }),
-      })
-    vi.stubGlobal('fetch', fetchSpy)
-
-    // First call — seeds cache with lodash.
-    await lookupCVEsBatch([lodashDep])
-
-    // Second batch includes lodash (cached) + express (uncached).
-    const map = await lookupCVEsBatch([lodashDep, expressDep])
-
-    // fetch called a second time, but only for express.
-    expect(fetchSpy).toHaveBeenCalledTimes(2)
-    const secondCallBody = JSON.parse(fetchSpy.mock.calls[1][1].body)
-    expect(secondCallBody.queries).toHaveLength(1)
-    expect(secondCallBody.queries[0].package.name).toBe('express')
-
-    // Both deps present in result.
-    expect(map.get('lodash@4.17.20')![0].cveId).toBe('CVE-2021-23337')
-    expect(map.get('express@4.18.2')).toEqual([])
-  })
-
-  // ── empty input ──────────────────────────────────────────────────────────
-
-  it('returns an empty map when given no dependencies', async () => {
-    vi.stubGlobal('fetch', vi.fn())
-
-    const map = await lookupCVEsBatch([])
-    expect(map.size).toBe(0)
-    expect(fetch).not.toHaveBeenCalled()
-  })
-
-  // ── API error ────────────────────────────────────────────────────────────
-
-  it('throws when the OSV API responds with a non-OK status', async () => {
-    mockFetch({}, false)
-
-    await expect(lookupCVEsBatch([lodashDep])).rejects.toThrow('OSV.dev batch API error: 500')
+    const { byDependency } = await lookupCVEsBatch([log4jDep])
+    expect(byDependency.get(depKey(log4jDep))!.map((f) => f.cveId).sort()).toEqual(['CVE-2021-44228', 'CVE-2021-45105'])
   })
 })

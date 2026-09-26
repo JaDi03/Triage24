@@ -1,4 +1,4 @@
-import type { CRAReport } from '@/types'
+import type { CRAReport, CraNotification, CraStatus } from '@/types'
 
 type Risk = CRAReport['overallRisk']
 
@@ -10,16 +10,44 @@ const RISK_CONFIG: Record<Risk, { label: string; bg: string; text: string; borde
   PASS:     { label: 'PASS',     bg: 'bg-green-500',   text: 'text-white',      border: 'border-green-600' },
 }
 
+const STATUS_CONFIG: Record<CraStatus, { title: string; body: string; classes: string }> = {
+  report_required: {
+    title: 'CRA Art. 14 — notification required',
+    body: 'The product contains an actively exploited vulnerability or a severe incident. Send the early warning and the notification to the CSIRT designated as coordinator and to ENISA via the single reporting platform (Art. 14(7)), and inform impacted users (Art. 14(8)).',
+    classes: 'border-red-500 bg-red-50 text-red-800',
+  },
+  review_required: {
+    title: 'CRA Art. 14 — review required',
+    body: 'A finding falls under Art. 14, but it may not be contained in the product. Confirm before the deadlines below.',
+    classes: 'border-orange-400 bg-orange-50 text-orange-800',
+  },
+  not_required: {
+    title: 'No CRA Art. 14 notification indicated',
+    body: 'No actively exploited vulnerability or malicious release was found in the dependencies. Vulnerabilities that are not actively exploited do not trigger Art. 14 notifications, but should still be fixed.',
+    classes: 'border-green-500 bg-green-50 text-green-800',
+  },
+}
+
+const CATEGORY_LABEL: Record<CraNotification['category'], string> = {
+  actively_exploited_vulnerability: 'Actively exploited vulnerability',
+  severe_incident: 'Severe incident (malicious release)',
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
 interface Props {
   report: CRAReport
 }
 
 export default function ReportSummary({ report }: Props) {
   const risk = RISK_CONFIG[report.overallRisk]
+  const status = STATUS_CONFIG[report.craStatus]
 
   return (
     <section className="space-y-5">
-      {/* ── Overall risk badge ── */}
+      {/* ── Technical risk badge ── */}
       <div className="flex items-center gap-4">
         <span
           className={[
@@ -30,7 +58,7 @@ export default function ReportSummary({ report }: Props) {
           {risk.label}
         </span>
         <p className="text-gray-600 text-sm">
-          Overall CRA Art. 14 risk for{' '}
+          Technical risk for{' '}
           <a
             href={report.repoUrl}
             target="_blank"
@@ -42,27 +70,62 @@ export default function ReportSummary({ report }: Props) {
         </p>
       </div>
 
-      {/* ── Disclosure deadline alert ── */}
-      {report.disclosureRequired && report.disclosureDeadlineHours !== null && (
-        <div
-          role="alert"
-          className={[
-            'rounded-lg border-l-4 p-4',
-            report.disclosureDeadlineHours === 24
-              ? 'border-red-500 bg-red-50 text-red-800'
-              : 'border-orange-400 bg-orange-50 text-orange-800',
-          ].join(' ')}
-        >
-          <p className="font-semibold text-sm">
-            ⚠️ CRA Art. 14 §{report.disclosureDeadlineHours === 24 ? '3' : '4'} — Disclosure required within{' '}
-            <strong>{report.disclosureDeadlineHours} hours</strong>
+      {/* ── CRA Art. 14 status ── */}
+      <div role={report.craStatus === 'not_required' ? 'status' : 'alert'} className={`rounded-lg border-l-4 p-4 ${status.classes}`}>
+        <p className="font-semibold text-sm">{status.title}</p>
+        <p className="text-sm mt-1">{status.body}</p>
+
+        {report.deadlines && (
+          <dl className="mt-3 grid gap-2 sm:grid-cols-3 text-sm">
+            <div>
+              <dt className="text-xs uppercase tracking-wide opacity-75">Became aware</dt>
+              <dd className="font-medium">{formatDate(report.deadlines.awareAt)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide opacity-75">Early warning due (24 h)</dt>
+              <dd className="font-medium">{formatDate(report.deadlines.earlyWarningDueAt)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide opacity-75">Notification due (72 h)</dt>
+              <dd className="font-medium">{formatDate(report.deadlines.notificationDueAt)}</dd>
+            </div>
+          </dl>
+        )}
+        {report.deadlines && (
+          <p className="mt-2 text-xs opacity-80">
+            These are maximums: both are due without undue delay (Art. 14(2)(a)-(b), 14(4)(a)-(b)). The clock
+            starts when the manufacturer becomes aware; the time of this analysis is used as the default.
           </p>
-          <p className="text-sm mt-1">
-            {report.disclosureDeadlineHours === 24
-              ? 'One or more actively exploited vulnerabilities (CISA KEV) were detected. You must notify ENISA within 24 hours of discovery.'
-              : 'Vulnerabilities requiring disclosure were detected. Submit a complete notification to ENISA and relevant national CSIRTs within 72 hours.'}
-          </p>
-        </div>
+        )}
+      </div>
+
+      {/* ── Findings that fall under Art. 14 ── */}
+      {report.notifications.length > 0 && (
+        <ul className="space-y-2">
+          {report.notifications.map((n, i) => (
+            <li key={`${n.dep.name}-${n.cve.cveId}-${i}`} className="rounded-lg border border-gray-200 bg-white p-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono font-semibold text-gray-900">{n.cve.cveId}</span>
+                <span className="text-gray-600">
+                  in {n.dep.name} {n.dep.version}
+                </span>
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+                  {CATEGORY_LABEL[n.category]}
+                </span>
+                <span
+                  className={[
+                    'rounded-full px-2 py-0.5 text-xs font-bold',
+                    n.status === 'report_required' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700',
+                  ].join(' ')}
+                >
+                  {n.status === 'report_required' ? 'Report required' : 'Review required'}
+                </span>
+              </div>
+              <p className="mt-1 text-gray-700">{n.reason}</p>
+              <p className="mt-1 text-xs text-gray-500">{n.legalBasis}</p>
+            </li>
+          ))}
+        </ul>
       )}
 
       {/* ── SBOM / SECURITY.md status ── */}
@@ -71,13 +134,13 @@ export default function ReportSummary({ report }: Props) {
           label="SBOM"
           present={report.hasSBOM}
           presentText="SBOM file detected in the repository."
-          absentText="No SBOM file found. CRA Art. 14 recommends maintaining an up-to-date SBOM."
+          absentText="No SBOM file found. The CRA requires an SBOM covering at least the top-level dependencies (Annex I, Part II(1)), applicable from 11 December 2027."
         />
         <StatusCard
           label="SECURITY.md"
           present={report.hasSecurityPolicy}
           presentText="Security policy (SECURITY.md) is present."
-          absentText="No SECURITY.md found. A vulnerability disclosure policy is strongly recommended."
+          absentText="No SECURITY.md found. The CRA requires a coordinated vulnerability disclosure policy (Annex I, Part II(5)), applicable from 11 December 2027."
         />
       </div>
     </section>

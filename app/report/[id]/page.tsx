@@ -91,6 +91,24 @@ export default async function ReportPage({ params }: Props) {
             />
           </Section>
 
+          {/* ── Coverage notes ── */}
+          {(report.unresolvedDeps.length > 0 || report.warnings.length > 0) && (
+            <Section title="Not checked">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
+                {report.unresolvedDeps.length > 0 && (
+                  <p>
+                    {report.unresolvedDeps.length} dependencies have a version that could not be resolved (for
+                    example, one inherited from a parent POM) and were not checked:{' '}
+                    <span className="font-mono text-xs">{report.unresolvedDeps.join(', ')}</span>
+                  </p>
+                )}
+                {report.warnings.map((warning, i) => (
+                  <p key={i}>{warning}</p>
+                ))}
+              </div>
+            </Section>
+          )}
+
           {/* ── SAST findings ── */}
           <Section
             title="SAST Findings"
@@ -104,7 +122,8 @@ export default async function ReportPage({ params }: Props) {
 
       {/* ── Footer ── */}
       <footer className="border-t border-gray-200 bg-white py-6 text-center text-xs text-gray-400">
-        triage24 — EU Cyber Resilience Act Article 14 compliance agent
+        <p>triage24 — EU Cyber Resilience Act Article 14 compliance agent</p>
+        <p className="mt-1 font-medium text-gray-500">Drafting and triage assistant. Not legal advice.</p>
       </footer>
     </div>
   )

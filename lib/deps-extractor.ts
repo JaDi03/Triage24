@@ -31,7 +31,7 @@ export function extractFromPackageLock(content: string): Dependency[] {
   }
 
   const deps: Dependency[] = []
-  const seen = new Set<string>()
+  const seen = new Map<string, Dependency>()
 
   for (const [key, entry] of Object.entries(lock.packages)) {
     // The root package ("") has no name to extract
@@ -42,10 +42,16 @@ export function extractFromPackageLock(content: string): Dependency[] {
     if (!name || !version) continue
 
     const id = `${name}@${version}`
-    if (seen.has(id)) continue
-    seen.add(id)
+    const existing = seen.get(id)
+    if (existing) {
+      // The same release installed for production and for development ships in the product.
+      if (existing.dev && !entry.dev) delete existing.dev
+      continue
+    }
 
-    deps.push({ name, version, ecosystem: 'npm' })
+    const dep: Dependency = { name, version, ecosystem: 'npm', ...(entry.dev ? { dev: true } : {}) }
+    seen.set(id, dep)
+    deps.push(dep)
   }
 
   return deps
@@ -57,6 +63,7 @@ interface PomDependency {
   groupId?: string | number
   artifactId?: string | number
   version?: string | number
+  scope?: string | number
 }
 
 interface PomProject {
@@ -111,6 +118,8 @@ export function extractFromPomXml(content: string): Dependency[] {
       name: `${groupId}:${artifactId}`,
       version: version || 'unknown',
       ecosystem: 'maven',
+      // Test-scoped artifacts are not packaged with the product.
+      ...(resolve(dep.scope) === 'test' ? { dev: true } : {}),
     })
   }
 

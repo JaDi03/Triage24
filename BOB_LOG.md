@@ -19,7 +19,8 @@ Triage24 was built incrementally from scratch using IBM Bob 2.2.0 as the primary
 | **03** | Manifest Extractor (npm + Maven) | `Agent` | `c121497e1b7696dcba6fe0381dcccb35` | 0.820 | `lib/deps-extractor.ts` | 50/50 ✅ | [`task03_deps_extractor.PNG`](./bob_sessions/task03_deps_extractor.PNG) |
 | **04** | OSV.dev Batch Vuln Client | `Agent` | `7d102c83ba701fd9c1316fc58fd06b32` | 1.410 | `lib/osv.ts`, batch queries | 17/17 ✅ | [`task04_osv_client.PNG`](./bob_sessions/task04_osv_client.PNG) |
 | **05** | CISA KEV Catalog Matcher | `Agent` | `6aeefb91e9e584677b3afcad78fc9a5f` | 0.781 | `lib/kev.ts`, in-memory cache | 18/18 ✅ | [`task05_cisa_kev.PNG`](./bob_sessions/task05_cisa_kev.PNG) |
-| **06** | Dependency Reachability Scanner | `Agent` | Pending | Pending | `lib/reachability.ts` | Pending | Pending |
+| **06** | Static Analysis Engine (SAST) | `Agent` | `8618e25b874ee756d73bb30b52fb444a` | 0.719 | `lib/sast.ts`, 5 CRA rules | 48/48 ✅ | [`task06_sast_engine.PNG`](./bob_sessions/task06_sast_engine.PNG) |
+| **07** | CRA Compliance Scorer | `Agent` | Pending | Pending | `lib/cra-scorer.ts` | Pending | Pending |
 
 ---
 
@@ -114,3 +115,23 @@ Triage24 was built incrementally from scratch using IBM Bob 2.2.0 as the primary
   - **Cache Eviction Hook:** Exports `clearKevCache()` for deterministic test isolation.
 - **Verification:** `tests/kev.test.ts` — **18 passed of 18 tests** (85 passed of 85 across full project test suite in 88 ms).
 - **Evidence:** [`bob_sessions/task05_cisa_kev.PNG`](./bob_sessions/task05_cisa_kev.PNG)
+
+---
+
+### Task 06: Static Analysis Engine (SAST)
+- **Bob Mode:** `Agent Mode`
+- **Task ID:** `8618e25b874ee756d73bb30b52fb444a`
+- **Bobcoin Usage:** `0.719 Bobcoins` (Context: 34.2k / 270.0k tokens — 13%)
+- **Objective:** Build a zero-dependency, lightweight static analysis security testing engine in pure TypeScript implementing CRA Annex I essential requirements.
+- **Engineering Highlights:**
+  - **Rule Interface & Extensibility:** Created `SastRule` interface with `id`, `name`, `severity`, `description`, `recommendation`, and a deterministic `test(line: string)` evaluation function.
+  - **5 Built-In CRA Rules:**
+    - `SAST-001` (CRITICAL): Hardcoded API secrets, private keys, bearer tokens, or access credentials.
+    - `SAST-002` (HIGH): Dangerous dynamic execution via `eval()` or `new Function()`.
+    - `SAST-003` (HIGH): Raw SQL query concatenation prone to SQL injection vulnerabilities.
+    - `SAST-004` (MEDIUM): Insecure plaintext `http://` URLs in network requests (`fetch`/`axios`).
+    - `SAST-005` (HIGH): Disabled TLS/SSL certificate verification (`rejectUnauthorized: false`).
+  - **Single-Pass Line Scanner:** `scanFile(path, content)` conducts 1-based line scanning with automatic 200-character snippet truncation for readable reports.
+  - **Safe Repository Traversal:** `scanRepo(files)` automatically filters out third-party/generated folders (`node_modules`, `dist`, `.git`) and ignores oversized files (> 500 KB) to prevent memory exhaustion.
+- **Verification:** `tests/sast.test.ts` — **48 passed of 48 tests** (133 passed of 133 across full project test suite in 99 ms).
+- **Evidence:** [`bob_sessions/task06_sast_engine.PNG`](./bob_sessions/task06_sast_engine.PNG)

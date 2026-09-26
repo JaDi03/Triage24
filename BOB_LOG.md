@@ -20,7 +20,8 @@ Triage24 was built incrementally from scratch using IBM Bob 2.2.0 as the primary
 | **04** | OSV.dev Batch Vuln Client | `Agent` | `7d102c83ba701fd9c1316fc58fd06b32` | 1.410 | `lib/osv.ts`, batch queries | 17/17 ✅ | [`task04_osv_client.PNG`](./bob_sessions/task04_osv_client.PNG) |
 | **05** | CISA KEV Catalog Matcher | `Agent` | `6aeefb91e9e584677b3afcad78fc9a5f` | 0.781 | `lib/kev.ts`, in-memory cache | 18/18 ✅ | [`task05_cisa_kev.PNG`](./bob_sessions/task05_cisa_kev.PNG) |
 | **06** | Static Analysis Engine (SAST) | `Agent` | `8618e25b874ee756d73bb30b52fb444a` | 0.719 | `lib/sast.ts`, 5 CRA rules | 48/48 ✅ | [`task06_sast_engine.PNG`](./bob_sessions/task06_sast_engine.PNG) |
-| **07** | CRA Compliance Scorer | `Agent` | Pending | Pending | `lib/cra-scorer.ts` | Pending | Pending |
+| **07** | CRA Compliance Scorer | `Agent` | `429d2db112566f5ad96adf8cc1f2f25c` | 0.911 | `lib/cra-scorer.ts` | 30/30 ✅ | [`task07_cra_scorer.PNG`](./bob_sessions/task07_cra_scorer.PNG) |
+| **08** | Audit API Route | `Agent` | Pending | Pending | `app/api/audit/route.ts` | Pending | Pending |
 
 ---
 
@@ -135,3 +136,22 @@ Triage24 was built incrementally from scratch using IBM Bob 2.2.0 as the primary
   - **Safe Repository Traversal:** `scanRepo(files)` automatically filters out third-party/generated folders (`node_modules`, `dist`, `.git`) and ignores oversized files (> 500 KB) to prevent memory exhaustion.
 - **Verification:** `tests/sast.test.ts` — **48 passed of 48 tests** (133 passed of 133 across full project test suite in 99 ms).
 - **Evidence:** [`bob_sessions/task06_sast_engine.PNG`](./bob_sessions/task06_sast_engine.PNG)
+
+---
+
+### Task 07: CRA Compliance Scorer
+- **Bob Mode:** `Agent Mode`
+- **Task ID:** `429d2db112566f5ad96adf8cc1f2f25c`
+- **Bobcoin Usage:** `0.911 Bobcoins` (Context: 35.7k / 270.0k tokens — 13%)
+- **Objective:** Synthesize dependency, vulnerability, KEV active exploitation, and SAST findings into a legal compliance report aligned with EU Cyber Resilience Act (CRA) Article 14 obligations.
+- **Engineering Highlights:**
+  - **CRA Article 14 Urgency Escalation:**
+    - Any vulnerability matched in the CISA KEV catalog escalates to `CRITICAL` risk with `disclosureRequired = true` and `disclosureDeadlineHours = 24` (mandated 24h Early Warning to ENISA/CSIRTs).
+    - Unexploited `CRITICAL` or `HIGH` CVEs, or `CRITICAL` SAST findings require notification with `disclosureDeadlineHours = 72`.
+    - Repositories without findings resolve to `PASS` with `disclosureRequired = false`.
+  - **SBOM & Security Policy Detection:**
+    - Detects Software Bill of Materials (SBOM) compliant with CRA Annex I Part II (`sbom.json`, `sbom.xml`, `*.spdx`, `bom.xml`), correctly filtering out tree directory matches.
+    - Inspects root and `.github/` directories for official disclosure policies (`SECURITY.md`).
+  - **Robust Report Metadata:** Generates RFC 4122 UUID v4 `reportId` via `crypto.randomUUID()` and ISO 8601 timestamps.
+- **Verification:** `tests/cra-scorer.test.ts` — **30 passed of 30 tests** (163 passed of 163 across full project test suite in 142 ms).
+- **Evidence:** [`bob_sessions/task07_cra_scorer.PNG`](./bob_sessions/task07_cra_scorer.PNG)

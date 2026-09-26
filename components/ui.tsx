@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import type { CVERecord } from '@/types'
 import { CRA_ARTICLE_14_URL, CRA_OFFICIAL_URL } from '@/lib/regulation'
+import ThemeToggle from '@/components/ThemeToggle'
 
 // ─── Shell ───────────────────────────────────────────────────────────────────
 
@@ -21,7 +22,10 @@ export function AppHeader({ children }: { children?: ReactNode }) {
           <span className="font-semibold tracking-tight">Triage24</span>
           <span className="hidden text-xs text-ink-inverse/70 sm:inline">CRA Article 14 compliance agent</span>
         </Link>
-        {children}
+        <div className="flex items-center gap-4">
+          {children}
+          <ThemeToggle />
+        </div>
       </div>
     </header>
   )
@@ -50,7 +54,7 @@ export function ExternalTextLink({ href, children }: { href: string; children: R
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-0.5 text-primary underline-offset-2 hover:text-primary-hover hover:underline"
+      className="inline-flex items-center gap-0.5 text-link underline-offset-2 hover:text-link-hover hover:underline"
     >
       {children}
       <ExternalLink className="h-3 w-3" aria-hidden="true" />
@@ -65,8 +69,8 @@ export type Tone = 'danger' | 'warning' | 'caution' | 'success' | 'malicious' | 
 
 const TAG_TONES: Record<Tone, string> = {
   danger: 'bg-danger text-ink-inverse',
-  warning: 'bg-warning text-ink',
-  caution: 'bg-caution text-ink',
+  warning: 'bg-warning text-on-bright',
+  caution: 'bg-caution text-on-bright',
   success: 'bg-success-soft text-success-ink',
   malicious: 'bg-malicious text-ink-inverse',
   primary: 'bg-primary-muted text-primary-active',
@@ -104,7 +108,7 @@ const NOTIFICATION_STYLES: Record<NotificationKind, { box: string; icon: LucideI
   error: { box: 'border-danger bg-danger-soft', icon: ShieldAlert, iconColor: 'text-danger' },
   warning: { box: 'border-warning bg-warning-soft', icon: AlertTriangle, iconColor: 'text-warning-ink' },
   success: { box: 'border-success bg-success-soft', icon: CheckCircle2, iconColor: 'text-success' },
-  info: { box: 'border-primary bg-primary-soft', icon: Info, iconColor: 'text-primary' },
+  info: { box: 'border-primary bg-primary-soft', icon: Info, iconColor: 'text-link' },
 }
 
 export function InlineNotification({

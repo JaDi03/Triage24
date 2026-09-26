@@ -51,7 +51,7 @@ export default function DepsTable({ report }: Props) {
               }}
               className={[
                 'px-3 py-1.5 text-sm',
-                filter === value ? 'bg-ink text-ink-inverse' : 'bg-layer text-ink-secondary hover:bg-layer-hover',
+                filter === value ? 'bg-primary text-ink-inverse' : 'bg-layer text-ink-secondary hover:bg-layer-hover',
               ].join(' ')}
             >
               {label}
@@ -103,7 +103,7 @@ export default function DepsTable({ report }: Props) {
                       target="_blank"
                       rel="noopener noreferrer"
                       title={row.cve.description}
-                      className="inline-flex items-center gap-1 font-mono text-primary hover:text-primary-hover hover:underline"
+                      className="inline-flex items-center gap-1 font-mono text-link hover:text-link-hover hover:underline"
                     >
                       {row.cve.cveId}
                       <ExternalLink className="h-3 w-3" aria-hidden="true" />
@@ -139,7 +139,7 @@ export default function DepsTable({ report }: Props) {
         <button
           type="button"
           onClick={() => setLimit((n) => n + PAGE_SIZE * 4)}
-          className="text-sm text-primary hover:text-primary-hover hover:underline"
+          className="text-sm text-link hover:text-link-hover hover:underline"
         >
           Show more ({rows.length - limit} remaining)
         </button>

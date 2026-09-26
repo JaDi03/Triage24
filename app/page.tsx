@@ -68,7 +68,7 @@ export default function Home() {
           <div className="mt-4 grid gap-px border border-line bg-line sm:grid-cols-3">
             {DUTIES.map(({ icon: Icon, article, title, body }) => (
               <div key={article} className="bg-layer p-5">
-                <Icon className="h-6 w-6 text-primary" aria-hidden="true" />
+                <Icon className="h-6 w-6 text-link" aria-hidden="true" />
                 <p className="mt-4 text-xs font-medium text-ink-helper">{article}</p>
                 <h3 className="mt-1 text-base font-semibold text-ink">{title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-ink-secondary">{body}</p>

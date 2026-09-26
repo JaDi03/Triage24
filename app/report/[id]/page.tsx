@@ -97,7 +97,7 @@ export default function ReportPage() {
                   : 'An unexpected error occurred. Please try again.'}
               </p>
             </InlineNotification>
-            <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline">
+            <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-link hover:underline">
               <ArrowLeft className="h-4 w-4" aria-hidden="true" />
               Back to the analysis
             </Link>
@@ -130,7 +130,7 @@ function Report({ report }: { report: CRAReport }) {
         <div>
           <p className="text-xs text-ink-helper">CRA Article 14 report · analyzed {formatDateTime(report.analyzedAt)}</p>
           <h1 className="mt-1 break-all text-2xl font-semibold text-ink sm:text-3xl">
-            <a href={report.repoUrl} target="_blank" rel="noopener noreferrer" className="hover:text-primary">
+            <a href={report.repoUrl} target="_blank" rel="noopener noreferrer" className="hover:text-link">
               {repoLabel(report.repoUrl)}
             </a>
           </h1>
@@ -138,7 +138,7 @@ function Report({ report }: { report: CRAReport }) {
         <button
           type="button"
           onClick={() => downloadReport(report)}
-          className="flex h-10 items-center gap-6 border border-primary px-4 text-sm font-medium text-primary hover:bg-primary hover:text-ink-inverse"
+          className="flex h-10 items-center gap-6 border border-primary px-4 text-sm font-medium text-link hover:bg-primary hover:text-ink-inverse"
         >
           Download JSON
           <Download className="h-4 w-4" aria-hidden="true" />

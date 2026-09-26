@@ -156,7 +156,7 @@ export default function RepoForm() {
                 setUrl(example.url)
                 void analyze(example.url)
               }}
-              className="border border-line bg-layer px-3 py-1 text-ink-secondary hover:border-primary hover:text-primary"
+              className="border border-line bg-layer px-3 py-1 text-ink-secondary hover:border-primary hover:text-link"
             >
               {example.label}
             </button>

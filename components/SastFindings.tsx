@@ -51,7 +51,7 @@ export default function SastFindings({ findings }: { findings: SastFinding[] }) 
               <p className="text-sm text-ink-secondary">{finding.description}</p>
 
               <div className="flex gap-2 border-l-4 border-primary bg-primary-soft px-3 py-2">
-                <Lightbulb className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
+                <Lightbulb className="mt-0.5 h-4 w-4 flex-shrink-0 text-link" aria-hidden="true" />
                 <p className="text-sm text-ink">
                   <span className="font-medium">Recommendation: </span>
                   {finding.recommendation}
@@ -66,7 +66,7 @@ export default function SastFindings({ findings }: { findings: SastFinding[] }) 
         <button
           type="button"
           onClick={() => setLimit((n) => n + PAGE_SIZE)}
-          className="text-sm text-primary hover:text-primary-hover hover:underline"
+          className="text-sm text-link hover:text-link-hover hover:underline"
         >
           Show more ({findings.length - limit} remaining)
         </button>

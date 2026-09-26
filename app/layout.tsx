@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -42,10 +43,10 @@ export default function RootLayout({
       // The theme script sets data-theme before React hydrates.
       suppressHydrationWarning
     >
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
-      </head>
-      <body className="min-h-full flex flex-col bg-canvas text-ink">{children}</body>
+      <body className="min-h-full flex flex-col bg-canvas text-ink">
+        {children}
+        <Script id="theme" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </body>
     </html>
   );
 }

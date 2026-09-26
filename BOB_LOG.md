@@ -18,7 +18,8 @@ Triage24 was built incrementally from scratch using IBM Bob 2.2.0 as the primary
 | **02** | GitHub Repo Fetcher | `Agent` | `7bb8039d3de34f668f56baecd75d78e9` | 0.737 | `lib/github.ts`, SSRF guards | 25/25 ✅ | [`task02_github_fetcher.PNG`](./bob_sessions/task02_github_fetcher.PNG) |
 | **03** | Manifest Extractor (npm + Maven) | `Agent` | `c121497e1b7696dcba6fe0381dcccb35` | 0.820 | `lib/deps-extractor.ts` | 50/50 ✅ | [`task03_deps_extractor.PNG`](./bob_sessions/task03_deps_extractor.PNG) |
 | **04** | OSV.dev Batch Vuln Client | `Agent` | `7d102c83ba701fd9c1316fc58fd06b32` | 1.410 | `lib/osv.ts`, batch queries | 17/17 ✅ | [`task04_osv_client.PNG`](./bob_sessions/task04_osv_client.PNG) |
-| **05** | CISA KEV Catalog Matcher | `Agent` | Pending | Pending | `lib/kev.ts` | Pending | Pending |
+| **05** | CISA KEV Catalog Matcher | `Agent` | `6aeefb91e9e584677b3afcad78fc9a5f` | 0.781 | `lib/kev.ts`, in-memory cache | 18/18 ✅ | [`task05_cisa_kev.PNG`](./bob_sessions/task05_cisa_kev.PNG) |
+| **06** | Dependency Reachability Scanner | `Agent` | Pending | Pending | `lib/reachability.ts` | Pending | Pending |
 
 ---
 
@@ -97,3 +98,19 @@ Triage24 was built incrementally from scratch using IBM Bob 2.2.0 as the primary
   - **Vitest Alias Support:** Configured `@/` path resolution in `vitest.config.ts` matching TypeScript paths.
 - **Verification:** `tests/osv.test.ts` — **17 passed of 17 tests** (67 passed across entire project test suite).
 - **Evidence:** [`bob_sessions/task04_osv_client.PNG`](./bob_sessions/task04_osv_client.PNG)
+
+---
+
+### Task 05: CISA KEV Catalog Matcher
+- **Bob Mode:** `Agent Mode`
+- **Task ID:** `6aeefb91e9e584677b3afcad78fc9a5f`
+- **Bobcoin Usage:** `0.781 Bobcoins` (Context: 35.4k / 270.0k tokens — 13%)
+- **Objective:** Download, validate, and cache the CISA Known Exploited Vulnerabilities (KEV) catalog; cross-reference dependency CVE findings for active exploitation.
+- **Engineering Highlights:**
+  - **In-Memory TTL Caching:** Module-level `{ entries, fetchedAt }` cache with 1-hour TTL to prevent repeated downloads from CISA during audit runs.
+  - **O(1) Set Lookup:** `matchKev(cveIds, catalog)` builds a `Set<string>` from candidate CVEs before filtering, ensuring constant-time lookup over ~1,100 catalog entries.
+  - **Graceful Degradation:** Safely handles missing `vulnerabilities` property or empty feeds by returning an empty array without runtime exceptions.
+  - **Deterministic Time-Travel Tests:** Uses `vi.spyOn(Date, 'now')` to advance system time and assert cache expiration without real timer delays.
+  - **Cache Eviction Hook:** Exports `clearKevCache()` for deterministic test isolation.
+- **Verification:** `tests/kev.test.ts` — **18 passed of 18 tests** (85 passed of 85 across full project test suite in 88 ms).
+- **Evidence:** [`bob_sessions/task05_cisa_kev.PNG`](./bob_sessions/task05_cisa_kev.PNG)

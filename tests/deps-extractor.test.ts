@@ -478,3 +478,13 @@ describe('development dependencies', () => {
     expect(deps.find((d) => d.name === 'org.slf4j:slf4j-api')?.dev).toBeUndefined()
   })
 })
+
+describe('platform-specific dependencies', () => {
+  it('keeps the "os" field of npm lockfile entries', () => {
+    const lock = JSON.stringify({
+      lockfileVersion: 3,
+      packages: { 'node_modules/fsevents': { version: '1.2.9', optional: true, os: ['darwin'] } },
+    })
+    expect(extractFromPackageLock(lock)).toEqual([{ name: 'fsevents', version: '1.2.9', ecosystem: 'npm', os: ['darwin'] }])
+  })
+})

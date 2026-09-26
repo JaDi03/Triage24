@@ -60,30 +60,42 @@ const LEGAL_BASIS: Record<CraNotification['category'], string> = {
 const DEV_ONLY_REASON =
   'It is a development or test dependency and may not be contained in the product (Art. 14(1) and (3) cover what affects the product); confirm whether it ships.'
 
+/** Why a finding under Art. 14 may not concern the product, or null when it does. */
+function reviewReason(dep: Dependency): string | null {
+  if (dep.dev) return DEV_ONLY_REASON
+  const onlyOn = dep.os?.filter((os) => !os.startsWith('!'))
+  if (onlyOn && onlyOn.length > 0) {
+    return `It is only installed on ${onlyOn.join(', ')}; confirm whether the product is built or distributed for that platform (Art. 14(1) and (3) cover what affects the product).`
+  }
+  return null
+}
+
 function classifyKev(dep: Dependency, cve: CVERecord, kev: KevEntry): CraNotification {
+  const review = reviewReason(dep)
   return {
     category: 'actively_exploited_vulnerability',
-    status: dep.dev ? 'review_required' : 'report_required',
+    status: review ? 'review_required' : 'report_required',
     dep,
     cve,
     kev,
     legalBasis: LEGAL_BASIS.actively_exploited_vulnerability,
-    reason: dep.dev
-      ? DEV_ONLY_REASON
-      : `${kev.cveID} is listed in the CISA Known Exploited Vulnerabilities catalog (reliable evidence of active exploitation, Art. 3(42)) and ${dep.name} ${dep.version} is a dependency of the product.`,
+    reason:
+      review ??
+      `${kev.cveID} is listed in the CISA Known Exploited Vulnerabilities catalog (reliable evidence of active exploitation, Art. 3(42)) and ${dep.name} ${dep.version} is a dependency of the product.`,
   }
 }
 
 function classifyMalicious(dep: Dependency, cve: CVERecord): CraNotification {
+  const review = reviewReason(dep)
   return {
     category: 'severe_incident',
-    status: dep.dev ? 'review_required' : 'report_required',
+    status: review ? 'review_required' : 'report_required',
     dep,
     cve,
     legalBasis: LEGAL_BASIS.severe_incident,
-    reason: dep.dev
-      ? DEV_ONLY_REASON
-      : `${dep.name} ${dep.version} is a release published with malicious code, which "has led or is capable of leading to the introduction or execution of malicious code in a product" (Art. 14(5)(b)).`,
+    reason:
+      review ??
+      `${dep.name} ${dep.version} is a release published with malicious code, which "has led or is capable of leading to the introduction or execution of malicious code in a product" (Art. 14(5)(b)).`,
   }
 }
 

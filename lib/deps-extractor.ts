@@ -5,7 +5,7 @@ import type { Dependency } from '../types'
 
 interface PackageLock {
   lockfileVersion: number
-  packages?: Record<string, { version?: string; dev?: boolean }>
+  packages?: Record<string, { version?: string; dev?: boolean; os?: string[] }>
 }
 
 /** Strip UTF-8 BOM (0xFEFF) that some tools prepend to JSON files. */
@@ -49,7 +49,13 @@ export function extractFromPackageLock(content: string): Dependency[] {
       continue
     }
 
-    const dep: Dependency = { name, version, ecosystem: 'npm', ...(entry.dev ? { dev: true } : {}) }
+    const dep: Dependency = {
+      name,
+      version,
+      ecosystem: 'npm',
+      ...(entry.dev ? { dev: true } : {}),
+      ...(Array.isArray(entry.os) && entry.os.length > 0 ? { os: entry.os } : {}),
+    }
     seen.set(id, dep)
     deps.push(dep)
   }

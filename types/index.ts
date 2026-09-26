@@ -14,6 +14,8 @@ export interface Dependency {
   ecosystem: Ecosystem
   /** Development or test-only dependency (npm "dev": true, Maven scope "test"); may not ship in the product. */
   dev?: boolean
+  /** Only installed on these operating systems (npm lockfile "os", e.g. ["darwin"]). */
+  os?: string[]
 }
 
 export interface CVERecord {

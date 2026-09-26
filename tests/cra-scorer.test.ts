@@ -287,3 +287,25 @@ describe('Report metadata', () => {
     expect(report.cveFindings[0].cves).toHaveLength(2)
   })
 })
+
+describe('Platform-specific dependencies', () => {
+  const macOnly: Dependency = { name: 'fsevents', version: '1.2.9', ecosystem: 'npm', os: ['darwin'] }
+
+  it('asks for a review when a malicious release is only installed on one OS', () => {
+    const report = score({
+      deps: [macOnly],
+      cveMap: new Map([[depKey(macOnly), [makeCVE('MAL-2023-462', 'CRITICAL', null, true)]]]),
+    })
+    expect(report.craStatus).toBe('review_required')
+    expect(report.notifications[0].reason).toContain('only installed on darwin')
+  })
+
+  it('ignores negated OS entries such as "!win32"', () => {
+    const notWindows: Dependency = { ...macOnly, os: ['!win32'] }
+    const report = score({
+      deps: [notWindows],
+      cveMap: new Map([[depKey(notWindows), [makeCVE('MAL-2023-462', 'CRITICAL', null, true)]]]),
+    })
+    expect(report.craStatus).toBe('report_required')
+  })
+})

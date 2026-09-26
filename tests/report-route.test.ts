@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
-import { reportCache } from '@/app/api/audit/route'
+import { reportCache } from '@/lib/report-cache'
 import { GET } from '@/app/api/report/[id]/route'
 import type { CRAReport } from '@/types'
 

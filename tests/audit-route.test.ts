@@ -45,7 +45,8 @@ import { lookupCVEsBatch } from '@/lib/osv'
 import { downloadKevCatalog, matchKev } from '@/lib/kev'
 import { scanRepo } from '@/lib/sast'
 import { scoreCRA } from '@/lib/cra-scorer'
-import { POST, reportCache } from '@/app/api/audit/route'
+import { POST } from '@/app/api/audit/route'
+import { reportCache } from '@/lib/report-cache'
 import type { CRAReport } from '@/types'
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -244,6 +245,48 @@ describe('POST /api/audit', () => {
 
     expect(res.status).toBe(500)
     expect(body.error).toBeTruthy()
+  })
+
+  // ── Errors after the tree was fetched ────────────────────────────────────────
+
+  it('returns 502 with a JSON error when OSV.dev fails', async () => {
+    setupHappyPath()
+    vi.mocked(lookupCVEsBatch).mockRejectedValue(new Error('OSV.dev batch API error: 503 Service Unavailable'))
+
+    const res = await POST(makeRequest({ url: 'https://github.com/owner/repo' }))
+    const body = await res.json()
+
+    expect(res.status).toBe(502)
+    expect(body.error).toContain('OSV.dev is unavailable')
+  })
+
+  it('returns 502 when the CISA KEV catalog cannot be downloaded', async () => {
+    setupHappyPath()
+    vi.mocked(downloadKevCatalog).mockRejectedValue(new Error('CISA KEV catalog fetch failed: 500'))
+
+    const res = await POST(makeRequest({ url: 'https://github.com/owner/repo' }))
+
+    expect(res.status).toBe(502)
+    expect((await res.json()).error).toContain('CISA KEV')
+  })
+
+  it('returns 429 when GitHub rate-limits a file download', async () => {
+    setupHappyPath()
+    vi.mocked(extractDependencies).mockRejectedValue(new GithubError('GitHub API rate limit exceeded (403).', 403))
+
+    const res = await POST(makeRequest({ url: 'https://github.com/owner/repo' }))
+
+    expect(res.status).toBe(429)
+  })
+
+  it('reports source files that could not be downloaded as a warning', async () => {
+    setupHappyPath()
+    vi.mocked(fetchFileContent).mockRejectedValue(new Error('boom'))
+
+    await POST(makeRequest({ url: 'https://github.com/owner/repo' }))
+
+    const params = vi.mocked(scoreCRA).mock.calls[0][0]
+    expect(params.warnings).toContain('1 of 1 source files could not be downloaded; the code findings are incomplete.')
   })
 
   // ── SAST skips files with size >= 500 KB ─────────────────────────────────────

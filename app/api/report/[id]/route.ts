@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { reportCache } from '@/app/api/audit/route'
+import { reportCache } from '@/lib/report-cache'
 
 // ─── GET /api/report/[id] ─────────────────────────────────────────────────────
 

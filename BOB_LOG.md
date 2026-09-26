@@ -22,7 +22,8 @@ Triage24 was built incrementally from scratch using IBM Bob 2.2.0 as the primary
 | **06** | Static Analysis Engine (SAST) | `Agent` | `8618e25b874ee756d73bb30b52fb444a` | 0.719 | `lib/sast.ts`, 5 CRA rules | 48/48 ✅ | [`task06_sast_engine.PNG`](./bob_sessions/task06_sast_engine.PNG) |
 | **07** | CRA Compliance Scorer | `Agent` | `429d2db112566f5ad96adf8cc1f2f25c` | 0.911 | `lib/cra-scorer.ts` | 30/30 ✅ | [`task07_cra_scorer.PNG`](./bob_sessions/task07_cra_scorer.PNG) |
 | **08** | Audit API Route | `Agent` | `4b5c6ebdfea8bf63e6d3c8bc5d48f453` | 0.996 | `app/api/audit/route.ts` | 12/12 ✅ | [`task08_audit_route.PNG`](./bob_sessions/task08_audit_route.PNG) |
-| **09** | Frontend UI & Report Dashboard | `Agent` | Pending | Pending | Next.js Components & Pages | Pending | Pending |
+| **09** | Frontend UI & Report Dashboard | `Agent` | `5aa3eb3ea0be08053be705673c1725df` | 1.450 | Next.js Components & Pages | 3/3 ✅ | [`task09_frontend_ui.PNG`](./bob_sessions/task09_frontend_ui.PNG) |
+| **10** | Standalone CLI Tool | `Agent` | Pending | Pending | `scripts/cli.ts` | Pending | Pending |
 
 ---
 
@@ -177,3 +178,22 @@ Triage24 was built incrementally from scratch using IBM Bob 2.2.0 as the primary
   - **Strict HTTP Status Semantics:** Returns structured error payloads with appropriate HTTP status codes (400, 404, 429, 500).
 - **Verification:** `tests/audit-route.test.ts` — **12 passed of 12 tests** (175 passed of 175 across full project test suite in 211 ms).
 - **Evidence:** [`bob_sessions/task08_audit_route.PNG`](./bob_sessions/task08_audit_route.PNG)
+
+---
+
+### Task 09: Frontend UI & Interactive Report Dashboard
+- **Bob Mode:** `Agent Mode`
+- **Task ID:** `5aa3eb3ea0be08053be705673c1725df`
+- **Bobcoin Usage:** `1.450 Bobcoins` (Context: 43.0k / 270.0k tokens — 16%)
+- **Objective:** Build a responsive, accessible web interface in Next.js 16 (App Router + Tailwind CSS) enabling one-click repository audits and visual CRA compliance reporting.
+- **Engineering Highlights:**
+  - **Landing Page (`app/page.tsx`):** Modern hero section highlighting EU CRA Article 14 legal mandates, accompanied by three educational cards covering essential requirements, 24h Early Warning, and 72h Notification deadlines.
+  - **Interactive Repo Form (`components/RepoForm.tsx`):** Client component with URL pattern validation, animated SVG loading indicator, and automated redirection to dynamic report view upon audit completion.
+  - **Report Data API (`app/api/report/[id]/route.ts`):** Fast GET route querying in-memory `reportCache` by UUID with appropriate 404 handling.
+  - **Modular Dashboard Architecture:**
+    - `ReportSummary.tsx`: Semantic risk badge (`CRITICAL` red, `HIGH` orange, `MEDIUM` yellow, `LOW` blue, `PASS` green), statutory deadline badges (24h/72h), and status indicators for SBOM presence and security disclosure policy (`SECURITY.md`).
+    - `DepsTable.tsx`: Tabular view of vulnerable direct/transitive dependencies with CVSS scores and active `🚨 KEV` alerts for CISA catalog matches.
+    - `SastFindings.tsx`: Code-level static analysis findings including file path, line number, code snippet, and actionable mitigation guidance.
+  - **Dynamic Report Route (`app/report/[id]/page.tsx`):** Server Component with built-in error boundary fallbacks and `notFound()` handling.
+- **Verification:** `tests/report-route.test.ts` — **3 passed of 3 tests** (178 passed of 178 across full project test suite in 271 ms).
+- **Evidence:** [`bob_sessions/task09_frontend_ui.PNG`](./bob_sessions/task09_frontend_ui.PNG)

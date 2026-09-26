@@ -8,6 +8,8 @@ import type { CRAReport } from '@/types'
 import ReportSummary from '@/components/ReportSummary'
 import DepsTable from '@/components/DepsTable'
 import SastFindings from '@/components/SastFindings'
+import DraftsPanel from '@/components/DraftsPanel'
+import FixWithBob from '@/components/FixWithBob'
 import { AppFooter, AppHeader, InlineNotification, Section } from '@/components/ui'
 import { formatDateTime } from '@/lib/format'
 import { loadReportFromBrowser, saveReportInBrowser } from '@/lib/report-storage'
@@ -114,12 +116,17 @@ export default function ReportPage() {
 
 function Report({ report }: { report: CRAReport }) {
   const totalVulns = report.cveFindings.reduce((acc, f) => acc + f.cves.length, 0)
+  const article14 = report.notifications.filter((n) => n.status !== 'not_required').length
+  const reachable = report.cveFindings.reduce(
+    (acc, f) => acc + f.cves.filter((cve) => cve.reachability?.verdict === 'affected').length,
+    0,
+  )
   const tiles = [
-    { label: 'Article 14 findings', value: report.notifications.length, alert: report.notifications.length > 0 },
+    { label: 'Article 14 findings', value: article14, alert: article14 > 0 },
     { label: 'Actively exploited (KEV)', value: report.kevFindings.length, alert: report.kevFindings.length > 0 },
     { label: 'Malicious releases', value: report.maliciousFindings.length, alert: report.maliciousFindings.length > 0 },
+    { label: 'Reachable by the code', value: reachable, alert: reachable > 0 },
     { label: 'Vulnerable dependencies', value: report.cveFindings.length, alert: false },
-    { label: 'Known vulnerabilities', value: totalVulns, alert: false },
     { label: 'Code findings', value: report.sastFindings.length, alert: false },
   ]
 
@@ -157,6 +164,23 @@ function Report({ report }: { report: CRAReport }) {
 
       <Section title="Article 14 assessment">
         <ReportSummary report={report} />
+      </Section>
+
+      {report.drafts.length > 0 && (
+        <Section
+          title="Draft notifications"
+          description="Early warning, notification and user advisory for each Article 14 duty, ready to complete and send."
+        >
+          <DraftsPanel drafts={report.drafts} />
+        </Section>
+      )}
+
+      <Section
+        title="Fix with IBM Bob"
+        count={report.remediations.length}
+        description="Dependencies to upgrade, most urgent first, with the release that fixes every advisory and an instruction for IBM Bob."
+      >
+        <FixWithBob remediations={report.remediations} />
       </Section>
 
       <Section

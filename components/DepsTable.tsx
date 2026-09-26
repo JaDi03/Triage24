@@ -5,6 +5,7 @@ import { Bug, ExternalLink, Skull } from 'lucide-react'
 import type { CRAReport } from '@/types'
 import { toFindingRows } from '@/lib/findings'
 import { EmptyState, SeverityTag, Tag } from '@/components/ui'
+import { ReachabilityTag } from '@/components/Reachability'
 
 const PAGE_SIZE = 25
 
@@ -84,6 +85,7 @@ export default function DepsTable({ report }: Props) {
                 <th className="px-4 py-3">Severity</th>
                 <th className="px-4 py-3 text-right">CVSS</th>
                 <th className="px-4 py-3">Exploitation</th>
+                <th className="px-4 py-3">Reachability</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
@@ -127,6 +129,9 @@ export default function DepsTable({ report }: Props) {
                     ) : (
                       <span className="text-xs text-ink-helper">Not known</span>
                     )}
+                  </td>
+                  <td className="px-4 py-3" title={row.cve.reachability?.reasoning}>
+                    <ReachabilityTag reachability={row.cve.reachability} />
                   </td>
                 </tr>
               ))}

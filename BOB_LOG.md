@@ -21,7 +21,8 @@ Triage24 was built incrementally from scratch using IBM Bob 2.2.0 as the primary
 | **05** | CISA KEV Catalog Matcher | `Agent` | `6aeefb91e9e584677b3afcad78fc9a5f` | 0.781 | `lib/kev.ts`, in-memory cache | 18/18 ✅ | [`task05_cisa_kev.PNG`](./bob_sessions/task05_cisa_kev.PNG) |
 | **06** | Static Analysis Engine (SAST) | `Agent` | `8618e25b874ee756d73bb30b52fb444a` | 0.719 | `lib/sast.ts`, 5 CRA rules | 48/48 ✅ | [`task06_sast_engine.PNG`](./bob_sessions/task06_sast_engine.PNG) |
 | **07** | CRA Compliance Scorer | `Agent` | `429d2db112566f5ad96adf8cc1f2f25c` | 0.911 | `lib/cra-scorer.ts` | 30/30 ✅ | [`task07_cra_scorer.PNG`](./bob_sessions/task07_cra_scorer.PNG) |
-| **08** | Audit API Route | `Agent` | Pending | Pending | `app/api/audit/route.ts` | Pending | Pending |
+| **08** | Audit API Route | `Agent` | `4b5c6ebdfea8bf63e6d3c8bc5d48f453` | 0.996 | `app/api/audit/route.ts` | 12/12 ✅ | [`task08_audit_route.PNG`](./bob_sessions/task08_audit_route.PNG) |
+| **09** | Frontend UI & Report Dashboard | `Agent` | Pending | Pending | Next.js Components & Pages | Pending | Pending |
 
 ---
 
@@ -155,3 +156,24 @@ Triage24 was built incrementally from scratch using IBM Bob 2.2.0 as the primary
   - **Robust Report Metadata:** Generates RFC 4122 UUID v4 `reportId` via `crypto.randomUUID()` and ISO 8601 timestamps.
 - **Verification:** `tests/cra-scorer.test.ts` — **30 passed of 30 tests** (163 passed of 163 across full project test suite in 142 ms).
 - **Evidence:** [`bob_sessions/task07_cra_scorer.PNG`](./bob_sessions/task07_cra_scorer.PNG)
+
+---
+
+### Task 08: End-to-End Audit API Route
+- **Bob Mode:** `Agent Mode`
+- **Task ID:** `4b5c6ebdfea8bf63e6d3c8bc5d48f453`
+- **Bobcoin Usage:** `0.996 Bobcoins` (Context: 44.0k / 270.0k tokens — 16%)
+- **Objective:** Connect all domain engines (`github`, `deps-extractor`, `osv`, `kev`, `sast`, `cra-scorer`) into a resilient, production-ready Next.js API route (`POST /api/audit`).
+- **Engineering Highlights:**
+  - **Full Pipeline Orchestration:**
+    1. Validates repository URL via `parseRepoUrl` (returns HTTP 400 on malformed or non-GitHub hosts).
+    2. Fetches recursive Git tree via `fetchRepoTree` (returns HTTP 404 for missing/private repos, HTTP 429 on GitHub rate limits).
+    3. Extracts dependencies with `extractDependencies` supporting npm lockfiles (v2/v3) and Maven POMs.
+    4. Batch queries OSV.dev in a single roundtrip via `lookupCVEsBatch`.
+    5. Downloads and cross-references active exploitation via `downloadKevCatalog` and `matchKev`.
+    6. Conducts static analysis via `scanRepo` across source code files (< 500 KB).
+    7. Evaluates CRA compliance status, overall risk, and reporting deadlines via `scoreCRA`.
+  - **In-Memory Cache:** Exports `reportCache = new Map<string, CRAReport>()` to store audit results for subsequent frontend consumption.
+  - **Strict HTTP Status Semantics:** Returns structured error payloads with appropriate HTTP status codes (400, 404, 429, 500).
+- **Verification:** `tests/audit-route.test.ts` — **12 passed of 12 tests** (175 passed of 175 across full project test suite in 211 ms).
+- **Evidence:** [`bob_sessions/task08_audit_route.PNG`](./bob_sessions/task08_audit_route.PNG)

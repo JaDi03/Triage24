@@ -13,8 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Triage24 - CRA Article 14 Compliance Agent",
-  description: "Automated CRA Article 14 dependency reachability & vulnerability triage",
+  title: "Triage24 — CRA Article 14 compliance agent",
+  description:
+    "Checks the dependencies of a GitHub repository for actively exploited vulnerabilities and malicious releases, and whether they trigger the EU Cyber Resilience Act Article 14 reporting duties.",
 };
 
 export default function RootLayout({
@@ -27,7 +28,7 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col bg-canvas text-ink">{children}</body>
     </html>
   );
 }

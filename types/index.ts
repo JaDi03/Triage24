@@ -1,3 +1,11 @@
+export interface GitHubTreeItem {
+  path: string
+  type: 'blob' | 'tree'
+  sha?: string
+  size?: number
+  url?: string
+}
+
 export type Ecosystem = 'npm' | 'pypi' | 'maven' | 'unknown'
 
 export interface Dependency {

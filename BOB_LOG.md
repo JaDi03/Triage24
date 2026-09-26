@@ -17,7 +17,8 @@ Triage24 was built incrementally from scratch using IBM Bob 2.2.0 as the primary
 | **01** | Project Scaffolding | `Agent` | `e4f25191a6cc72e7f76e22569f909c5f` | 3.380 | Next.js 16, Tailwind, Vitest, Types | Baseline | [`task01_scaffolding.PNG`](./bob_sessions/task01_scaffolding.PNG) |
 | **02** | GitHub Repo Fetcher | `Agent` | `7bb8039d3de34f668f56baecd75d78e9` | 0.737 | `lib/github.ts`, SSRF guards | 25/25 ✅ | [`task02_github_fetcher.PNG`](./bob_sessions/task02_github_fetcher.PNG) |
 | **03** | Manifest Extractor (npm + Maven) | `Agent` | `c121497e1b7696dcba6fe0381dcccb35` | 0.820 | `lib/deps-extractor.ts` | 50/50 ✅ | [`task03_deps_extractor.PNG`](./bob_sessions/task03_deps_extractor.PNG) |
-| **04** | OSV.dev Batch Vuln Client | `Agent` | Pending | Pending | `lib/osv.ts` | Pending | Pending |
+| **04** | OSV.dev Batch Vuln Client | `Agent` | `7d102c83ba701fd9c1316fc58fd06b32` | 1.410 | `lib/osv.ts`, batch queries | 17/17 ✅ | [`task04_osv_client.PNG`](./bob_sessions/task04_osv_client.PNG) |
+| **05** | CISA KEV Catalog Matcher | `Agent` | Pending | Pending | `lib/kev.ts` | Pending | Pending |
 
 ---
 
@@ -79,3 +80,20 @@ Triage24 was built incrementally from scratch using IBM Bob 2.2.0 as the primary
   - **BOM Sanitization:** Stripped UTF-8 BOM (`0xFEFF`) to prevent Windows/PowerShell parse failures.
 - **Verification:** `tests/deps-extractor.test.ts` — **50 passed of 50 total tests** across the suite in 21 ms.
 - **Evidence:** [`bob_sessions/task03_deps_extractor.PNG`](./bob_sessions/task03_deps_extractor.PNG)
+
+---
+
+### Task 04: OSV.dev Batch Vulnerability Client
+- **Bob Mode:** `Agent Mode`
+- **Task ID:** `7d102c83ba701fd9c1316fc58fd06b32`
+- **Bobcoin Usage:** `1.410 Bobcoins` (Context: 45.5k / 270.0k tokens — 17%)
+- **Objective:** Query OSV.dev batch vulnerability API with high throughput, alias resolution, and client-side caching.
+- **Engineering Highlights:**
+  - **Single Batch Network Roundtrip:** `lookupCVEsBatch(deps)` queries `https://api.osv.dev/v1/querybatch` in a single POST with all npm and Maven dependencies index-aligned.
+  - **Ecosystem Normalization:** Automatically standardizes `maven` → `Maven` as required by the OSV.dev schema.
+  - **CVE Alias Resolution:** Extracts authoritative CVE IDs from OSV `aliases` arrays, prioritizing `CVE-*` entries over proprietary IDs with fallback to OSV identifiers.
+  - **CVSS Scoring & Severity Classification:** Maps numeric CVSS vector scores to standard CRA severity bands (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `NONE`).
+  - **In-Memory Cache:** `Map<string, CVERecord[]>` keyed by `name@version@ecosystem` to eliminate redundant queries for recurring packages across manifests.
+  - **Vitest Alias Support:** Configured `@/` path resolution in `vitest.config.ts` matching TypeScript paths.
+- **Verification:** `tests/osv.test.ts` — **17 passed of 17 tests** (67 passed across entire project test suite).
+- **Evidence:** [`bob_sessions/task04_osv_client.PNG`](./bob_sessions/task04_osv_client.PNG)

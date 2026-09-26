@@ -5,7 +5,7 @@ import type { Dependency } from '../types'
 
 interface PackageLock {
   lockfileVersion: number
-  packages?: Record<string, { version?: string; dev?: boolean }>
+  packages?: Record<string, { version?: string; dev?: boolean; os?: string[] }>
 }
 
 /** Strip UTF-8 BOM (0xFEFF) that some tools prepend to JSON files. */
@@ -31,7 +31,7 @@ export function extractFromPackageLock(content: string): Dependency[] {
   }
 
   const deps: Dependency[] = []
-  const seen = new Set<string>()
+  const seen = new Map<string, Dependency>()
 
   for (const [key, entry] of Object.entries(lock.packages)) {
     // The root package ("") has no name to extract
@@ -42,10 +42,22 @@ export function extractFromPackageLock(content: string): Dependency[] {
     if (!name || !version) continue
 
     const id = `${name}@${version}`
-    if (seen.has(id)) continue
-    seen.add(id)
+    const existing = seen.get(id)
+    if (existing) {
+      // The same release installed for production and for development ships in the product.
+      if (existing.dev && !entry.dev) delete existing.dev
+      continue
+    }
 
-    deps.push({ name, version, ecosystem: 'npm' })
+    const dep: Dependency = {
+      name,
+      version,
+      ecosystem: 'npm',
+      ...(entry.dev ? { dev: true } : {}),
+      ...(Array.isArray(entry.os) && entry.os.length > 0 ? { os: entry.os } : {}),
+    }
+    seen.set(id, dep)
+    deps.push(dep)
   }
 
   return deps
@@ -57,6 +69,7 @@ interface PomDependency {
   groupId?: string | number
   artifactId?: string | number
   version?: string | number
+  scope?: string | number
 }
 
 interface PomProject {
@@ -111,6 +124,8 @@ export function extractFromPomXml(content: string): Dependency[] {
       name: `${groupId}:${artifactId}`,
       version: version || 'unknown',
       ecosystem: 'maven',
+      // Test-scoped artifacts are not packaged with the product.
+      ...(resolve(dep.scope) === 'test' ? { dev: true } : {}),
     })
   }
 
@@ -122,39 +137,53 @@ export function extractFromPomXml(content: string): Dependency[] {
 type TreeEntry = { path: string; type: string }
 type FetchFile = (path: string) => Promise<string>
 
+const IGNORED_MANIFEST_DIRS = /(^|\/)(node_modules|target|build|dist)\//
+
 /**
  * Given the flat repo tree and a file-fetching callback, find all supported
  * manifest files and return a merged, deduplicated `Dependency[]`.
  *
- * Priority: package-lock.json > package.json (lock preferred), pom.xml.
+ * Every package-lock.json (v2/v3) and pom.xml is read, except those inside
+ * installed or build output folders. A manifest that cannot be read or parsed is
+ * skipped and reported in `warnings` instead of stopping the analysis.
  */
 export async function extractDependencies(
   tree: TreeEntry[],
   fetchFile: FetchFile,
+  warnings: string[] = [],
 ): Promise<Dependency[]> {
-  const paths = tree.filter((e) => e.type === 'blob').map((e) => e.path)
+  const paths = tree
+    .filter((e) => e.type === 'blob')
+    .map((e) => e.path)
+    .filter((p) => !IGNORED_MANIFEST_DIRS.test(p))
   const all: Dependency[] = []
 
-  // npm: prefer package-lock.json (v2/v3) over bare package.json
-  const lockPath = paths.find((p) => p === 'package-lock.json' || p.endsWith('/package-lock.json'))
-  if (lockPath) {
-    const content = await fetchFile(lockPath)
-    all.push(...extractFromPackageLock(content))
+  const manifests: Array<{ path: string; parse: (content: string) => Dependency[] }> = [
+    ...paths
+      .filter((p) => p === 'package-lock.json' || p.endsWith('/package-lock.json'))
+      .map((path) => ({ path, parse: extractFromPackageLock })),
+    ...paths
+      .filter((p) => p === 'pom.xml' || p.endsWith('/pom.xml'))
+      .map((path) => ({ path, parse: extractFromPomXml })),
+  ]
+
+  for (const manifest of manifests) {
+    try {
+      all.push(...manifest.parse(await fetchFile(manifest.path)))
+    } catch (err) {
+      warnings.push(
+        `${manifest.path} was skipped: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
   }
 
-  // Maven
-  const pomPaths = paths.filter((p) => p === 'pom.xml' || p.endsWith('/pom.xml'))
-  for (const pomPath of pomPaths) {
-    const content = await fetchFile(pomPath)
-    all.push(...extractFromPomXml(content))
+  // Deduplicate across manifests; a release used outside development ships in the product.
+  const byId = new Map<string, Dependency>()
+  for (const dep of all) {
+    const id = `${dep.ecosystem}:${dep.name}@${dep.version}`
+    const existing = byId.get(id)
+    if (!existing) byId.set(id, { ...dep })
+    else if (existing.dev && !dep.dev) delete existing.dev
   }
-
-  // Deduplicate across ecosystems
-  const seen = new Set<string>()
-  return all.filter((d) => {
-    const id = `${d.ecosystem}:${d.name}@${d.version}`
-    if (seen.has(id)) return false
-    seen.add(id)
-    return true
-  })
+  return [...byId.values()]
 }

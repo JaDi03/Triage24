@@ -1,41 +1,70 @@
-import { notFound } from 'next/navigation'
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import type { CRAReport } from '@/types'
 import ReportSummary from '@/components/ReportSummary'
 import DepsTable from '@/components/DepsTable'
 import SastFindings from '@/components/SastFindings'
+import { loadReportFromBrowser, saveReportInBrowser } from '@/lib/report-storage'
 
-interface Props {
-  params: Promise<{ id: string }>
-}
+type LoadState =
+  | { status: 'loading' }
+  | { status: 'ready'; report: CRAReport }
+  | { status: 'missing' }
+  | { status: 'error' }
 
-async function getReport(id: string): Promise<CRAReport | null> {
-  // Use absolute URL for server-side fetch in Next.js App Router
-  const baseUrl =
-    process.env.NEXT_PUBLIC_BASE_URL ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
+/**
+ * Reports are not stored on a server. The page reads the copy saved in the browser
+ * when the analysis finished, and falls back to the API, which only knows reports
+ * produced by the same server instance.
+ */
+async function loadReport(id: string): Promise<LoadState> {
+  const local = loadReportFromBrowser(id)
+  if (local) return { status: 'ready', report: local }
 
-  const res = await fetch(`${baseUrl}/api/report/${id}`, {
-    cache: 'no-store',
-  })
-
-  if (res.status === 404) return null
-  if (!res.ok) throw new Error(`Failed to fetch report: ${res.status}`)
-
-  return res.json() as Promise<CRAReport>
-}
-
-export default async function ReportPage({ params }: Props) {
-  const { id } = await params
-
-  let report: CRAReport | null
   try {
-    report = await getReport(id)
+    const res = await fetch(`/api/report/${encodeURIComponent(id)}`, { cache: 'no-store' })
+    if (res.status === 404) return { status: 'missing' }
+    if (!res.ok) return { status: 'error' }
+    const report = (await res.json()) as CRAReport
+    saveReportInBrowser(report)
+    return { status: 'ready', report }
   } catch {
+    return { status: 'error' }
+  }
+}
+
+export default function ReportPage() {
+  const { id } = useParams<{ id: string }>()
+  const [state, setState] = useState<LoadState>({ status: 'loading' })
+
+  useEffect(() => {
+    let cancelled = false
+    loadReport(id).then((next) => {
+      if (!cancelled) setState(next)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [id])
+
+  if (state.status === 'loading') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 text-sm text-gray-500">
+        Loading report…
+      </div>
+    )
+  }
+
+  if (state.status !== 'ready') {
     return (
       <ErrorLayout>
         <p className="text-red-700 font-medium">
-          An unexpected error occurred while loading this report. Please try again.
+          {state.status === 'missing'
+            ? 'This report is not available. Reports are kept only in the browser session where the analysis ran; run the analysis again.'
+            : 'An unexpected error occurred while loading this report. Please try again.'}
         </p>
         <Link href="/" className="mt-4 inline-block text-sm text-blue-600 hover:underline">
           ← Back to home
@@ -44,10 +73,7 @@ export default async function ReportPage({ params }: Props) {
     )
   }
 
-  if (!report) {
-    notFound()
-  }
-
+  const report = state.report
   const totalVulns = report.cveFindings.reduce((acc, f) => acc + f.cves.length, 0)
 
   return (
@@ -91,6 +117,24 @@ export default async function ReportPage({ params }: Props) {
             />
           </Section>
 
+          {/* ── Coverage notes ── */}
+          {(report.unresolvedDeps.length > 0 || report.warnings.length > 0) && (
+            <Section title="Not checked">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
+                {report.unresolvedDeps.length > 0 && (
+                  <p>
+                    {report.unresolvedDeps.length} dependencies have a version that could not be resolved (for
+                    example, one inherited from a parent POM) and were not checked:{' '}
+                    <span className="font-mono text-xs">{report.unresolvedDeps.join(', ')}</span>
+                  </p>
+                )}
+                {report.warnings.map((warning, i) => (
+                  <p key={i}>{warning}</p>
+                ))}
+              </div>
+            </Section>
+          )}
+
           {/* ── SAST findings ── */}
           <Section
             title="SAST Findings"
@@ -104,7 +148,8 @@ export default async function ReportPage({ params }: Props) {
 
       {/* ── Footer ── */}
       <footer className="border-t border-gray-200 bg-white py-6 text-center text-xs text-gray-400">
-        triage24 — EU Cyber Resilience Act Article 14 compliance agent
+        <p>triage24 — EU Cyber Resilience Act Article 14 compliance agent</p>
+        <p className="mt-1 font-medium text-gray-500">Drafting and triage assistant. Not legal advice.</p>
       </footer>
     </div>
   )

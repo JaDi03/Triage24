@@ -51,7 +51,7 @@ export default function DepsTable({ cveFindings, kevFindings }: Props) {
             <th className="px-4 py-3 text-left">CVE</th>
             <th className="px-4 py-3 text-left">Severity</th>
             <th className="px-4 py-3 text-left">CVSS</th>
-            <th className="px-4 py-3 text-left">CISA KEV</th>
+            <th className="px-4 py-3 text-left">Exploitation</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 bg-white">
@@ -59,12 +59,17 @@ export default function DepsTable({ cveFindings, kevFindings }: Props) {
             const sev = SEV_CONFIG[row.cve.severity]
             return (
               <tr key={`${row.dep.name}-${row.cve.cveId}-${i}`} className="hover:bg-gray-50 transition-colors">
-                <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{row.dep.name}</td>
+                <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
+                  {row.dep.name}
+                  {row.dep.dev && (
+                    <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-normal text-gray-500">dev</span>
+                  )}
+                </td>
                 <td className="px-4 py-3 font-mono text-gray-600 whitespace-nowrap">{row.dep.version}</td>
                 <td className="px-4 py-3 text-gray-500 capitalize">{row.dep.ecosystem}</td>
                 <td className="px-4 py-3 font-mono whitespace-nowrap">
                   <a
-                    href={`https://nvd.nist.gov/vuln/detail/${row.cve.cveId}`}
+                    href={`https://osv.dev/vulnerability/${encodeURIComponent(row.cve.osvIds[0] ?? row.cve.cveId)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-blue-600 hover:underline"
@@ -83,12 +88,16 @@ export default function DepsTable({ cveFindings, kevFindings }: Props) {
                   </span>
                 </td>
                 <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
-                  {row.cve.cvssScore.toFixed(1)}
+                  {row.cve.cvssScore !== null ? row.cve.cvssScore.toFixed(1) : '—'}
                 </td>
                 <td className="px-4 py-3">
-                  {row.isKev ? (
+                  {row.cve.malicious ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 text-purple-800 px-2.5 py-0.5 text-xs font-bold">
+                      ☠️ Malicious release
+                    </span>
+                  ) : row.isKev ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-red-100 text-red-700 px-2.5 py-0.5 text-xs font-bold">
-                      🚨 KEV
+                      🚨 CISA KEV
                     </span>
                   ) : (
                     <span className="text-gray-400 text-xs">—</span>

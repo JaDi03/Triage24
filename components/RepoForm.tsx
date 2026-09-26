@@ -2,8 +2,9 @@
 
 import { useState, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-
-const GITHUB_URL_RE = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/
+import { parseRepoUrl } from '@/lib/github'
+import { saveReportInBrowser } from '@/lib/report-storage'
+import type { CRAReport } from '@/types'
 
 export default function RepoForm() {
   const router = useRouter()
@@ -13,9 +14,13 @@ export default function RepoForm() {
 
   function validate(value: string): string | null {
     if (!value.trim()) return 'Please enter a GitHub repository URL.'
-    if (!GITHUB_URL_RE.test(value.trim()))
+    try {
+      // Same rules as the API: github.com only, with or without https://, .git or /tree/<ref>.
+      parseRepoUrl(value)
+      return null
+    } catch {
       return 'Must be a valid GitHub URL, e.g. https://github.com/owner/repo'
-    return null
+    }
   }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -35,14 +40,18 @@ export default function RepoForm() {
         body: JSON.stringify({ url: url.trim() }),
       })
 
-      const data = await res.json()
+      const data = (await res.json().catch(() => null)) as
+        | { reportId: string; report: CRAReport; error?: undefined }
+        | { error?: string }
+        | null
 
-      if (!res.ok) {
-        setError(data?.error ?? `Server error (${res.status})`)
+      if (!res.ok || !data || !('reportId' in data)) {
+        setError(data?.error ?? `Server error (${res.status}). Please try again.`)
         setLoading(false)
         return
       }
 
+      saveReportInBrowser(data.report)
       router.push(`/report/${data.reportId}`)
     } catch {
       setError('Network error — please try again.')

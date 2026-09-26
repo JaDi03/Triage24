@@ -346,3 +346,19 @@ describe('RULES export', () => {
     expect(RULES.every((r) => valid.has(r.severity))).toBe(true)
   })
 })
+
+describe('SAST false positives and secret masking', () => {
+  it('does NOT flag a method named eval, such as model.eval()', () => {
+    expect(findingsFor('SAST-002', scanFile('train.py', 'model.eval()'))).toHaveLength(0)
+  })
+
+  it('still flags a bare eval() call after an operator', () => {
+    expect(findingsFor('SAST-002', scanFile('a.js', 'const r = eval(code)'))).toHaveLength(1)
+  })
+
+  it('masks the value of a hardcoded secret in the snippet', () => {
+    const [finding] = findingsFor('SAST-001', scanFile('config.ts', `const apiKey = "sk_live_1234567890abcdef"`))
+    expect(finding.snippet).toBe('const apiKey = "sk_…"')
+    expect(finding.snippet).not.toContain('1234567890')
+  })
+})

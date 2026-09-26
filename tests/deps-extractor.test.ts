@@ -441,3 +441,50 @@ describe('extractDependencies', () => {
     expect(fetchFile).not.toHaveBeenCalled()
   })
 })
+
+describe('development dependencies', () => {
+  it('marks npm packages flagged "dev" in the lockfile', () => {
+    const lock = JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        '': { name: 'app' },
+        'node_modules/express': { version: '4.18.2' },
+        'node_modules/jest': { version: '29.0.0', dev: true },
+      },
+    })
+    const deps = extractFromPackageLock(lock)
+    expect(deps.find((d) => d.name === 'express')?.dev).toBeUndefined()
+    expect(deps.find((d) => d.name === 'jest')?.dev).toBe(true)
+  })
+
+  it('treats a release installed for both production and development as shipped', () => {
+    const lock = JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        'node_modules/a/node_modules/ms': { version: '2.1.3', dev: true },
+        'node_modules/ms': { version: '2.1.3' },
+      },
+    })
+    expect(extractFromPackageLock(lock)).toEqual([{ name: 'ms', version: '2.1.3', ecosystem: 'npm' }])
+  })
+
+  it('marks Maven test-scoped dependencies', () => {
+    const pom = `<project><dependencies>
+      <dependency><groupId>junit</groupId><artifactId>junit</artifactId><version>4.13.2</version><scope>test</scope></dependency>
+      <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId><version>2.0.9</version></dependency>
+    </dependencies></project>`
+    const deps = extractFromPomXml(pom)
+    expect(deps.find((d) => d.name === 'junit:junit')?.dev).toBe(true)
+    expect(deps.find((d) => d.name === 'org.slf4j:slf4j-api')?.dev).toBeUndefined()
+  })
+})
+
+describe('platform-specific dependencies', () => {
+  it('keeps the "os" field of npm lockfile entries', () => {
+    const lock = JSON.stringify({
+      lockfileVersion: 3,
+      packages: { 'node_modules/fsevents': { version: '1.2.9', optional: true, os: ['darwin'] } },
+    })
+    expect(extractFromPackageLock(lock)).toEqual([{ name: 'fsevents', version: '1.2.9', ecosystem: 'npm', os: ['darwin'] }])
+  })
+})

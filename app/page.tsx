@@ -27,34 +27,35 @@ export default function Home() {
           </h1>
 
           <p className="text-lg text-gray-600 max-w-2xl mx-auto leading-relaxed">
-            Scan any public GitHub repository in seconds. Get a full compliance report
-            covering open-source vulnerabilities, CISA KEV cross-reference, static analysis
-            (SAST), SBOM presence and mandatory{' '}
-            <strong className="text-gray-800">24 h / 72 h disclosure deadlines</strong> to
-            ENISA and national CSIRTs.
+            Scan any public GitHub repository in seconds. Triage24 checks its dependencies against
+            OSV.dev, flags the ones actively exploited (CISA KEV) or published with malicious code,
+            and tells you whether they fall under the{' '}
+            <strong className="text-gray-800">24 h / 72 h reporting duties</strong> of the EU Cyber
+            Resilience Act.
           </p>
 
           {/* ── CRA Info Box ── */}
           <div className="grid sm:grid-cols-3 gap-4 text-left mt-2">
             <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-1">
-              <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Art. 14 §1–2</p>
+              <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Art. 14(1) and 14(3)</p>
               <p className="text-sm text-gray-700">
-                Manufacturers must <strong>actively monitor</strong> vulnerabilities in their
-                products&apos; components and dependencies.
+                Manufacturers must notify <strong>actively exploited vulnerabilities</strong> and{' '}
+                <strong>severe incidents</strong> affecting their product to the CSIRT designated as
+                coordinator and to ENISA, through the single reporting platform.
               </p>
             </div>
             <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-1">
-              <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Art. 14 §3 — 24 h</p>
+              <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Art. 14(2)(a), 14(4)(a) — 24 h</p>
               <p className="text-sm text-gray-700">
-                <strong>Actively exploited</strong> vulnerabilities (CISA KEV) must be
-                notified to ENISA within <strong>24 hours</strong> of discovery.
+                An <strong>early warning</strong> without undue delay and in any event within{' '}
+                <strong>24 hours</strong> of becoming aware.
               </p>
             </div>
             <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-1">
-              <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide">Art. 14 §4 — 72 h</p>
+              <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide">Art. 14(2)(b), 14(4)(b) — 72 h</p>
               <p className="text-sm text-gray-700">
-                A more complete <strong>vulnerability notification</strong> must follow
-                within <strong>72 hours</strong> to ENISA and relevant CSIRTs.
+                A <strong>vulnerability or incident notification</strong> without undue delay and in
+                any event within <strong>72 hours</strong> of becoming aware.
               </p>
             </div>
           </div>
@@ -75,7 +76,8 @@ export default function Home() {
 
       {/* ── Footer ── */}
       <footer className="border-t border-gray-200 bg-white py-6 text-center text-xs text-gray-400">
-        triage24 — EU Cyber Resilience Act Article 14 compliance agent
+        <p>triage24 — EU Cyber Resilience Act Article 14 compliance agent</p>
+        <p className="mt-1 font-medium text-gray-500">Drafting and triage assistant. Not legal advice.</p>
       </footer>
     </div>
   )

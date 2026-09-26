@@ -36,7 +36,8 @@ export const RULES: SastRule[] = [
       'eval() or new Function() executes arbitrary code from a string, enabling code-injection and XSS attacks.',
     recommendation:
       'Avoid eval() and new Function(). Use safer alternatives such as JSON.parse() for data or static function references for callbacks.',
-    test: (line) => /\beval\s*\(|new\s+Function\s*\(/.test(line),
+    // A bare eval call, not a method named eval (e.g. PyTorch's model.eval()).
+    test: (line) => /(?<![\w.$])eval\s*\(|\bnew\s+Function\s*\(/.test(line),
   },
   {
     id: 'SAST-003',
@@ -81,6 +82,11 @@ export const RULES: SastRule[] = [
 
 const MAX_SNIPPET_LENGTH = 200
 
+/** Hides quoted values of 8+ characters so a report never repeats a secret. */
+function maskSecrets(line: string): string {
+  return line.replace(/(['"`])([^'"`]{8,})\1/g, (_, quote: string, value: string) => `${quote}${value.slice(0, 3)}…${quote}`)
+}
+
 function trimSnippet(line: string): string {
   const trimmed = line.trimEnd()
   return trimmed.length > MAX_SNIPPET_LENGTH
@@ -104,7 +110,7 @@ export function scanFile(filePath: string, content: string): SastFinding[] {
           severity: rule.severity,
           filePath,
           line: i + 1,
-          snippet: trimSnippet(line),
+          snippet: trimSnippet(rule.id === 'SAST-001' ? maskSecrets(line) : line),
           description: rule.description,
           recommendation: rule.recommendation,
         })

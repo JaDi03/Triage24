@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
-import { reportCache } from '@/app/api/audit/route'
+import { reportCache } from '@/lib/report-cache'
 import { GET } from '@/app/api/report/[id]/route'
 import type { CRAReport } from '@/types'
 
@@ -11,13 +11,19 @@ const MOCK_REPORT: CRAReport = {
   repoUrl: 'https://github.com/owner/repo',
   analyzedAt: '2024-01-01T00:00:00.000Z',
   overallRisk: 'HIGH',
+  craStatus: 'not_required',
+  notifications: [],
+  deadlines: null,
   hasSBOM: false,
   hasSecurityPolicy: true,
-  disclosureRequired: true,
-  disclosureDeadlineHours: 72,
+  disclosureRequired: false,
+  disclosureDeadlineHours: null,
   kevFindings: [],
+  maliciousFindings: [],
   cveFindings: [],
   sastFindings: [],
+  unresolvedDeps: [],
+  warnings: [],
 }
 
 function makeGetRequest(id: string): [NextRequest, { params: Promise<{ id: string }> }] {

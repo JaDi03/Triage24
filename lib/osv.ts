@@ -1,9 +1,16 @@
 import type { Dependency, CVERecord } from '@/types'
+import { cvss3BaseScore } from '@/lib/cvss'
+import { depKey, hasResolvedVersion } from '@/lib/dep-key'
 
 const OSV_BATCH_URL = 'https://api.osv.dev/v1/querybatch'
+const OSV_VULN_URL = 'https://api.osv.dev/v1/vulns'
 
-// Module-level cache: key = "name@version@ecosystem"
-const cache = new Map<string, CVERecord[]>()
+/** OSV accepts at most 1000 queries per querybatch request. */
+const MAX_QUERIES_PER_BATCH = 1000
+/** Follow-up requests for queries whose results are paginated. */
+const MAX_PAGE_ROUNDS = 5
+/** Parallel GET /v1/vulns/{id} requests. */
+const DETAIL_CONCURRENCY = 10
 
 // ─── OSV Request / Response Types ────────────────────────────────────────────
 
@@ -13,6 +20,7 @@ interface OsvQuery {
     name: string
     ecosystem: string
   }
+  page_token?: string
 }
 
 interface OsvSeverity {
@@ -26,22 +34,42 @@ interface OsvVuln {
   summary?: string
   published?: string
   severity?: OsvSeverity[]
+  database_specific?: {
+    severity?: string
+    cwe_ids?: string[]
+  }
 }
 
 interface OsvBatchRequest {
   queries: OsvQuery[]
 }
 
+/** querybatch only returns the ID and modification date of each vulnerability. */
 interface OsvBatchResponse {
-  results: Array<{ vulns?: OsvVuln[] }>
+  results: Array<{ vulns?: Array<{ id: string; modified?: string }>; next_page_token?: string }>
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/** Cache key for a dependency. */
-function cacheKey(dep: Dependency): string {
-  return `${dep.name}@${dep.version}@${dep.ecosystem}`
+export interface OsvLookupResult {
+  /** Findings keyed by depKey(dep); dependencies without vulnerabilities map to []. */
+  byDependency: Map<string, CVERecord[]>
+  /** Problems that did not stop the lookup (for example an advisory that could not be fetched). */
+  warnings: string[]
 }
+
+// ─── Caches (process lifetime) ───────────────────────────────────────────────
+
+/** depKey -> OSV IDs returned by querybatch. */
+const idCache = new Map<string, string[]>()
+/** OSV ID -> full OSV record. */
+const detailCache = new Map<string, OsvVuln>()
+
+/** Clears the module-level caches. Useful for testing. */
+export function clearOsvCache(): void {
+  idCache.clear()
+  detailCache.clear()
+}
+
+// ─── Query building ──────────────────────────────────────────────────────────
 
 /**
  * Builds the OSV batch request body from a list of dependencies.
@@ -53,24 +81,90 @@ export function buildOsvQuery(deps: Dependency[]): OsvBatchRequest {
       version: dep.version,
       package: {
         name: dep.name,
-        // OSV uses 'npm' and 'Maven'; our Ecosystem type already matches those strings.
+        // OSV uses 'npm' and 'Maven'.
         ecosystem: dep.ecosystem === 'maven' ? 'Maven' : dep.ecosystem,
       },
     })),
   }
 }
 
-/**
- * Parses a CVSS_V3 vector string like "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
- * and returns the base score from the E:X component, or falls back to extracting
- * the numeric score directly from "CVSS:3.x/..." entries reported by OSV as plain scores.
- */
-function parseCvssScore(scoreStr: string): number {
-  // OSV sometimes returns just a numeric string, sometimes a full vector.
-  const plain = parseFloat(scoreStr)
-  if (!isNaN(plain)) return plain
-  // Full CVSS vector — score is not encoded in the string; return 0 to signal unavailable.
-  return 0
+async function postQueryBatch(queries: OsvQuery[]): Promise<OsvBatchResponse> {
+  const response = await fetch(OSV_BATCH_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ queries }),
+  })
+  if (!response.ok) {
+    throw new Error(`OSV.dev batch API error: ${response.status} ${response.statusText}`)
+  }
+  return response.json()
+}
+
+/** Returns the OSV IDs affecting each dependency, index-aligned with `deps`. */
+async function fetchVulnIds(deps: Dependency[], warnings: string[]): Promise<string[][]> {
+  const idsPerDep: string[][] = deps.map(() => [])
+  const allQueries = buildOsvQuery(deps).queries
+
+  for (let start = 0; start < allQueries.length; start += MAX_QUERIES_PER_BATCH) {
+    // Each pending entry remembers which dependency the query belongs to.
+    let pending = allQueries
+      .slice(start, start + MAX_QUERIES_PER_BATCH)
+      .map((query, offset) => ({ index: start + offset, query }))
+
+    for (let round = 0; pending.length > 0; round++) {
+      if (round === MAX_PAGE_ROUNDS) {
+        warnings.push(
+          `OSV returned more pages than expected for ${pending.length} dependencies; some advisories may be missing.`,
+        )
+        break
+      }
+
+      const data = await postQueryBatch(pending.map((p) => p.query))
+      const next: typeof pending = []
+      pending.forEach((p, i) => {
+        const result = data.results[i]
+        for (const vuln of result?.vulns ?? []) idsPerDep[p.index].push(vuln.id)
+        if (result?.next_page_token) {
+          next.push({ index: p.index, query: { ...p.query, page_token: result.next_page_token } })
+        }
+      })
+      pending = next
+    }
+  }
+
+  return idsPerDep
+}
+
+/** Fetches the full OSV record for each ID not cached yet, with bounded concurrency. */
+async function fetchDetails(ids: string[], warnings: string[]): Promise<void> {
+  const queue = ids.filter((id) => !detailCache.has(id))
+
+  async function worker() {
+    for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+      try {
+        const response = await fetch(`${OSV_VULN_URL}/${encodeURIComponent(id)}`)
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+        detailCache.set(id, await response.json())
+      } catch (err) {
+        warnings.push(
+          `Could not load OSV advisory ${id} (${err instanceof Error ? err.message : String(err)}); it is listed without details.`,
+        )
+        detailCache.set(id, { id })
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(DETAIL_CONCURRENCY, queue.length) }, worker))
+}
+
+// ─── Mapping ─────────────────────────────────────────────────────────────────
+
+const SEVERITY_RANK: Record<CVERecord['severity'], number> = {
+  NONE: 0,
+  LOW: 1,
+  MEDIUM: 2,
+  HIGH: 3,
+  CRITICAL: 4,
 }
 
 function cvssToSeverity(score: number): CVERecord['severity'] {
@@ -81,80 +175,134 @@ function cvssToSeverity(score: number): CVERecord['severity'] {
   return 'NONE'
 }
 
-/** Maps a single OSV vuln object to a CVERecord. */
-function mapVuln(vuln: OsvVuln): CVERecord {
-  // Prefer a CVE alias; fall back to the OSV ID itself.
-  const cveId =
-    vuln.aliases?.find((a) => a.startsWith('CVE-')) ?? vuln.id
+/** GitHub advisories label severity CRITICAL / HIGH / MODERATE / LOW. */
+function labelToSeverity(label: string | undefined): CVERecord['severity'] {
+  switch (label?.toUpperCase()) {
+    case 'CRITICAL':
+      return 'CRITICAL'
+    case 'HIGH':
+      return 'HIGH'
+    case 'MODERATE':
+    case 'MEDIUM':
+      return 'MEDIUM'
+    case 'LOW':
+      return 'LOW'
+    default:
+      return 'NONE'
+  }
+}
 
-  const cvssScore = vuln.severity?.[0]
-    ? parseCvssScore(vuln.severity[0].score)
-    : 0
+/** CVSS v3 score from the vector when present; otherwise the advisory's severity label. */
+function scoreVuln(vuln: OsvVuln): { cvssScore: number | null; severity: CVERecord['severity'] } {
+  for (const entry of vuln.severity ?? []) {
+    const score = cvss3BaseScore(entry.score)
+    if (score !== null) return { cvssScore: score, severity: cvssToSeverity(score) }
+  }
+  return { cvssScore: null, severity: labelToSeverity(vuln.database_specific?.severity) }
+}
+
+function isMalicious(vuln: OsvVuln): boolean {
+  return (
+    vuln.id.startsWith('MAL-') ||
+    (vuln.aliases ?? []).some((alias) => alias.startsWith('MAL-')) ||
+    (vuln.database_specific?.cwe_ids ?? []).includes('CWE-506')
+  )
+}
+
+/** Groups records that describe the same issue (they share an ID or an alias). */
+function groupByAlias(vulns: OsvVuln[]): OsvVuln[][] {
+  const parent = new Map<string, string>()
+  const find = (x: string): string => {
+    let root = x
+    while (parent.get(root) !== root) root = parent.get(root)!
+    parent.set(x, root)
+    return root
+  }
+  const union = (a: string, b: string) => {
+    for (const x of [a, b]) if (!parent.has(x)) parent.set(x, x)
+    parent.set(find(a), find(b))
+  }
+
+  for (const vuln of vulns) {
+    union(vuln.id, vuln.id)
+    for (const alias of vuln.aliases ?? []) union(vuln.id, alias)
+  }
+
+  const groups = new Map<string, OsvVuln[]>()
+  for (const vuln of vulns) {
+    const root = find(vuln.id)
+    groups.set(root, [...(groups.get(root) ?? []), vuln])
+  }
+  return [...groups.values()]
+}
+
+/** Merges the records of one issue into a single finding. */
+function mergeGroup(group: OsvVuln[]): CVERecord {
+  const osvIds = [...new Set(group.map((v) => v.id))].sort()
+  const aliases = [...new Set(group.flatMap((v) => [v.id, ...(v.aliases ?? [])]))].sort()
+  const cves = aliases.filter((id) => id.startsWith('CVE-'))
+  const cveId = cves[0] ?? osvIds.find((id) => !id.startsWith('MAL-')) ?? osvIds[0]
+
+  let severity: CVERecord['severity'] = 'NONE'
+  let cvssScore: number | null = null
+  for (const vuln of group) {
+    const scored = scoreVuln(vuln)
+    if (SEVERITY_RANK[scored.severity] > SEVERITY_RANK[severity]) severity = scored.severity
+    if (scored.cvssScore !== null && (cvssScore === null || scored.cvssScore > cvssScore)) {
+      cvssScore = scored.cvssScore
+    }
+  }
+
+  // GitHub advisory summaries are more descriptive than MAL-* ones.
+  const described =
+    group.find((v) => v.summary && !v.id.startsWith('MAL-')) ?? group.find((v) => v.summary)
+  const published = group
+    .map((v) => v.published)
+    .filter((date): date is string => Boolean(date))
+    .sort()[0]
 
   return {
     cveId,
-    description: vuln.summary ?? '',
+    osvIds,
+    aliases,
+    description: described?.summary ?? '',
     cvssScore,
-    severity: cvssToSeverity(cvssScore),
-    publishedDate: vuln.published ?? '',
+    severity,
+    publishedDate: published ?? '',
+    malicious: group.some(isMalicious),
   }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Queries the OSV.dev batch endpoint for all supplied dependencies in a single
- * HTTP POST request and returns a Map keyed by "name@version" → CVERecord[].
+ * Looks up the known vulnerabilities of each dependency on OSV.dev.
  *
- * Results are cached at module level for the lifetime of the process.
+ * querybatch only returns vulnerability IDs, so the full record of each ID is fetched
+ * from /v1/vulns/{id} to get its aliases (CVE IDs) and severity. Advisories that are
+ * aliases of each other are merged into one finding. Dependencies whose version is not
+ * resolved are not queried: OSV would match them against every version.
  */
-export async function lookupCVEsBatch(
-  deps: Dependency[],
-): Promise<Map<string, CVERecord[]>> {
-  const result = new Map<string, CVERecord[]>()
-  if (deps.length === 0) return result
+export async function lookupCVEsBatch(deps: Dependency[]): Promise<OsvLookupResult> {
+  const warnings: string[] = []
+  const byDependency = new Map<string, CVERecord[]>()
 
-  // Split deps into uncached and already-cached.
-  const uncached: Dependency[] = []
-  for (const dep of deps) {
-    const key = cacheKey(dep)
-    if (cache.has(key)) {
-      result.set(`${dep.name}@${dep.version}`, cache.get(key)!)
-    } else {
-      uncached.push(dep)
-    }
+  const queryable = [...new Map(deps.filter(hasResolvedVersion).map((d) => [depKey(d), d])).values()]
+  if (queryable.length === 0) return { byDependency, warnings }
+
+  const uncached = queryable.filter((dep) => !idCache.has(depKey(dep)))
+  if (uncached.length > 0) {
+    const idsPerDep = await fetchVulnIds(uncached, warnings)
+    uncached.forEach((dep, i) => idCache.set(depKey(dep), [...new Set(idsPerDep[i])]))
   }
 
-  if (uncached.length === 0) return result
+  const allIds = [...new Set(queryable.flatMap((dep) => idCache.get(depKey(dep)) ?? []))]
+  await fetchDetails(allIds, warnings)
 
-  const body = buildOsvQuery(uncached)
-
-  const response = await fetch(OSV_BATCH_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-
-  if (!response.ok) {
-    throw new Error(`OSV.dev batch API error: ${response.status} ${response.statusText}`)
+  for (const dep of queryable) {
+    const vulns = (idCache.get(depKey(dep)) ?? []).map((id) => detailCache.get(id) ?? { id })
+    byDependency.set(depKey(dep), groupByAlias(vulns).map(mergeGroup))
   }
 
-  const data: OsvBatchResponse = await response.json()
-
-  // Results are index-aligned with the queries array.
-  for (let i = 0; i < uncached.length; i++) {
-    const dep = uncached[i]
-    const vulns = data.results[i]?.vulns ?? []
-    const cves = vulns.map(mapVuln)
-    const key = cacheKey(dep)
-    cache.set(key, cves)
-    result.set(`${dep.name}@${dep.version}`, cves)
-  }
-
-  return result
-}
-
-/** Clears the module-level cache. Useful for testing. */
-export function clearOsvCache(): void {
-  cache.clear()
+  return { byDependency, warnings }
 }

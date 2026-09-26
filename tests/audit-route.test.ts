@@ -13,8 +13,7 @@ vi.mock('@/lib/github', () => ({
     }
   },
   parseRepoUrl: vi.fn(),
-  fetchRepoTree: vi.fn(),
-  fetchFileContent: vi.fn(),
+  fetchRepoSnapshot: vi.fn(),
 }))
 
 vi.mock('@/lib/deps-extractor', () => ({
@@ -39,7 +38,7 @@ vi.mock('@/lib/cra-scorer', () => ({
 }))
 
 // Import mocked modules and the route AFTER setting up mocks
-import { parseRepoUrl, fetchRepoTree, fetchFileContent, GithubError } from '@/lib/github'
+import { parseRepoUrl, fetchRepoSnapshot, GithubError } from '@/lib/github'
 import { extractDependencies } from '@/lib/deps-extractor'
 import { lookupCVEsBatch } from '@/lib/osv'
 import { downloadKevCatalog, matchKev } from '@/lib/kev'
@@ -51,10 +50,16 @@ import type { CRAReport } from '@/types'
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
-const MOCK_TREE = [
-  { path: 'package-lock.json', type: 'blob' as const, sha: 'abc', size: 1000 },
-  { path: 'src/index.ts', type: 'blob' as const, sha: 'def', size: 2000 },
-]
+const MOCK_SNAPSHOT = {
+  tree: [
+    { path: 'package-lock.json', type: 'blob' as const, sha: '', size: 1000 },
+    { path: 'src/index.ts', type: 'blob' as const, sha: '', size: 2000 },
+  ],
+  files: new Map([
+    ['package-lock.json', '{}'],
+    ['src/index.ts', 'export const x = 1'],
+  ]),
+}
 
 const MOCK_REPORT: CRAReport = {
   reportId: 'test-report-id-1234',
@@ -88,8 +93,7 @@ function makeRequest(body: unknown): NextRequest {
 
 function setupHappyPath() {
   vi.mocked(parseRepoUrl).mockReturnValue({ owner: 'owner', repo: 'repo' })
-  vi.mocked(fetchRepoTree).mockResolvedValue(MOCK_TREE)
-  vi.mocked(fetchFileContent).mockResolvedValue('{}')
+  vi.mocked(fetchRepoSnapshot).mockResolvedValue(MOCK_SNAPSHOT)
   vi.mocked(extractDependencies).mockResolvedValue([])
   vi.mocked(lookupCVEsBatch).mockResolvedValue({ byDependency: new Map(), warnings: [] })
   vi.mocked(downloadKevCatalog).mockResolvedValue([])
@@ -132,7 +136,7 @@ describe('POST /api/audit', () => {
     setupHappyPath()
     const order: string[] = []
 
-    vi.mocked(fetchRepoTree).mockImplementation(async () => { order.push('fetchRepoTree'); return MOCK_TREE })
+    vi.mocked(fetchRepoSnapshot).mockImplementation(async () => { order.push('fetchRepoSnapshot'); return MOCK_SNAPSHOT })
     vi.mocked(extractDependencies).mockImplementation(async () => { order.push('extractDependencies'); return [] })
     vi.mocked(lookupCVEsBatch).mockImplementation(async () => { order.push('lookupCVEsBatch'); return { byDependency: new Map(), warnings: [] } })
     vi.mocked(downloadKevCatalog).mockImplementation(async () => { order.push('downloadKevCatalog'); return [] })
@@ -142,7 +146,7 @@ describe('POST /api/audit', () => {
     await POST(makeRequest({ url: 'https://github.com/owner/repo' }))
 
     expect(order).toEqual([
-      'fetchRepoTree',
+      'fetchRepoSnapshot',
       'extractDependencies',
       'lookupCVEsBatch',
       'downloadKevCatalog',
@@ -206,9 +210,9 @@ describe('POST /api/audit', () => {
 
   // ── 404 — repo not found ──────────────────────────────────────────────────────
 
-  it('returns 404 when fetchRepoTree throws GithubError(404)', async () => {
+  it('returns 404 when fetchRepoSnapshot throws GithubError(404)', async () => {
     vi.mocked(parseRepoUrl).mockReturnValue({ owner: 'owner', repo: 'private-repo' })
-    vi.mocked(fetchRepoTree).mockRejectedValue(
+    vi.mocked(fetchRepoSnapshot).mockRejectedValue(
       new GithubError('Repository not found or is private (404).', 404),
     )
 
@@ -221,9 +225,9 @@ describe('POST /api/audit', () => {
 
   // ── 429 — rate limiting ───────────────────────────────────────────────────────
 
-  it('returns 429 when fetchRepoTree throws GithubError(403) — rate limit', async () => {
+  it('returns 429 when fetchRepoSnapshot throws GithubError(403) — rate limit', async () => {
     vi.mocked(parseRepoUrl).mockReturnValue({ owner: 'owner', repo: 'repo' })
-    vi.mocked(fetchRepoTree).mockRejectedValue(
+    vi.mocked(fetchRepoSnapshot).mockRejectedValue(
       new GithubError('GitHub API rate limit exceeded (403).', 403),
     )
 
@@ -236,9 +240,9 @@ describe('POST /api/audit', () => {
 
   // ── 500 — unexpected errors ───────────────────────────────────────────────────
 
-  it('returns 500 when an unexpected error occurs during tree fetch', async () => {
+  it('returns 500 when an unexpected error occurs during the download', async () => {
     vi.mocked(parseRepoUrl).mockReturnValue({ owner: 'owner', repo: 'repo' })
-    vi.mocked(fetchRepoTree).mockRejectedValue(new Error('Network timeout'))
+    vi.mocked(fetchRepoSnapshot).mockRejectedValue(new Error('Network timeout'))
 
     const res = await POST(makeRequest({ url: 'https://github.com/owner/repo' }))
     const body = await res.json()
@@ -279,38 +283,11 @@ describe('POST /api/audit', () => {
     expect(res.status).toBe(429)
   })
 
-  it('reports source files that could not be downloaded as a warning', async () => {
+  it('scans the extracted source files but not the manifests', async () => {
     setupHappyPath()
-    vi.mocked(fetchFileContent).mockRejectedValue(new Error('boom'))
 
     await POST(makeRequest({ url: 'https://github.com/owner/repo' }))
 
-    const params = vi.mocked(scoreCRA).mock.calls[0][0]
-    expect(params.warnings).toContain('1 of 1 source files could not be downloaded; the code findings are incomplete.')
-  })
-
-  // ── SAST skips files with size >= 500 KB ─────────────────────────────────────
-
-  it('excludes files >= 500 KB from SAST analysis', async () => {
-    const largeTree = [
-      { path: 'src/big.ts', type: 'blob' as const, sha: 'xxx', size: 500 * 1024 },
-      { path: 'src/small.ts', type: 'blob' as const, sha: 'yyy', size: 1024 },
-    ]
-    vi.mocked(parseRepoUrl).mockReturnValue({ owner: 'owner', repo: 'repo' })
-    vi.mocked(fetchRepoTree).mockResolvedValue(largeTree)
-    vi.mocked(fetchFileContent).mockResolvedValue('// code')
-    vi.mocked(extractDependencies).mockResolvedValue([])
-    vi.mocked(lookupCVEsBatch).mockResolvedValue({ byDependency: new Map(), warnings: [] })
-    vi.mocked(downloadKevCatalog).mockResolvedValue([])
-    vi.mocked(matchKev).mockReturnValue([])
-    vi.mocked(scanRepo).mockReturnValue([])
-    vi.mocked(scoreCRA).mockReturnValue(MOCK_REPORT)
-
-    await POST(makeRequest({ url: 'https://github.com/owner/repo' }))
-
-    // Only the small file should be passed to scanRepo
-    const scanCall = vi.mocked(scanRepo).mock.calls[0][0]
-    expect(scanCall).toHaveLength(1)
-    expect(scanCall[0].path).toBe('src/small.ts')
+    expect(vi.mocked(scanRepo).mock.calls[0][0]).toEqual([{ path: 'src/index.ts', content: 'export const x = 1' }])
   })
 })

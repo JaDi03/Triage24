@@ -1,8 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { strToU8, zipSync } from 'fflate'
 import {
   parseRepoUrl,
   fetchRepoTree,
   fetchFileContent,
+  fetchRepoSnapshot,
   GithubError,
 } from '../lib/github'
 
@@ -341,5 +343,58 @@ describe('fetchFileContent', () => {
     await expect(
       fetchFileContent('owner', 'repo', 'file.ts'),
     ).rejects.toMatchObject({ status: 500 })
+  })
+})
+
+// ─── fetchRepoSnapshot ───────────────────────────────────────────────────────
+
+describe('fetchRepoSnapshot', () => {
+  function zipResponse(entries: Record<string, string>, root = 'owner-repo-abc1234') {
+    const files: Record<string, Uint8Array> = {}
+    for (const [path, content] of Object.entries(entries)) files[`${root}/${path}`] = strToU8(content)
+    return new Response(zipSync(files))
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('downloads one ZIP and extracts manifests and source files', async () => {
+    const fetchMock = vi.fn<(url: string) => Promise<Response>>(async () =>
+      zipResponse({
+        'pom.xml': '<project/>',
+        'src/App.java': 'class App {}',
+        'README.md': '# readme',
+        'node_modules/x/index.js': 'ignored()',
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const snapshot = await fetchRepoSnapshot('owner', 'repo')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://api.github.com/repos/owner/repo/zipball')
+    expect(snapshot.commitSha).toBe('abc1234')
+    expect(snapshot.tree.map((e) => e.path).sort()).toEqual(['README.md', 'node_modules/x/index.js', 'pom.xml', 'src/App.java'])
+    expect([...snapshot.files.keys()].sort()).toEqual(['pom.xml', 'src/App.java'])
+    expect(snapshot.files.get('pom.xml')).toBe('<project/>')
+  })
+
+  it('throws GithubError 404 for a missing or private repository', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })))
+    await expect(fetchRepoSnapshot('owner', 'missing')).rejects.toMatchObject({ status: 404 })
+  })
+
+  it('throws GithubError 403 when rate limited', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 403 })))
+    await expect(fetchRepoSnapshot('owner', 'repo')).rejects.toMatchObject({ status: 403 })
+  })
+
+  it('throws GithubError 413 when the archive is too large', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('x', { headers: { 'content-length': String(200 * 1024 * 1024) } })),
+    )
+    await expect(fetchRepoSnapshot('owner', 'huge')).rejects.toMatchObject({ status: 413 })
   })
 })

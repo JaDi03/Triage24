@@ -1,3 +1,5 @@
+import { unzipSync } from 'fflate'
+
 const GITHUB_API = 'https://api.github.com'
 
 // ─── Error type ──────────────────────────────────────────────────────────────
@@ -177,4 +179,116 @@ export async function fetchFileContent(
   return Buffer.from(data.content.replace(/\n/g, ''), 'base64').toString(
     'utf-8',
   )
+}
+
+// ─── Repository snapshot (one ZIP download) ──────────────────────────────────
+
+/** Largest ZIP accepted from GitHub. */
+const MAX_ZIP_BYTES = 100 * 1024 * 1024
+/** Manifests (lockfiles can be several MB) and source files kept in memory. */
+const MAX_MANIFEST_BYTES = 20 * 1024 * 1024
+const MAX_SOURCE_BYTES = 500 * 1024
+
+const MANIFEST_RE = /(^|\/)(package-lock\.json|pom\.xml)$/
+const SOURCE_RE = /\.(js|jsx|ts|tsx|mjs|cjs|java|py|rb|go|php|cs|cpp|c|h)$/i
+const SKIPPED_DIRS_RE = /(^|\/)(node_modules|\.git|target|build|dist|vendor|\.next|coverage)\//
+
+export interface RepoSnapshot {
+  /** Every file in the repository (paths relative to its root). */
+  tree: TreeEntry[]
+  /** Contents of the manifests and source files that the analysis reads. */
+  files: Map<string, string>
+  /** Short commit SHA of the analyzed revision, taken from the ZIP's root folder. */
+  commitSha?: string
+}
+
+function shouldExtract(path: string, size: number): boolean {
+  if (MANIFEST_RE.test(path)) return size <= MAX_MANIFEST_BYTES && !SKIPPED_DIRS_RE.test(path)
+  return SOURCE_RE.test(path) && size < MAX_SOURCE_BYTES && !SKIPPED_DIRS_RE.test(path)
+}
+
+async function readLimited(res: Response, limit: number): Promise<Uint8Array> {
+  const declared = Number(res.headers.get('content-length'))
+  if (declared > limit) {
+    throw new GithubError(`The repository is too large to analyze (over ${limit / 1024 / 1024} MB).`, 413)
+  }
+  if (!res.body) return new Uint8Array(await res.arrayBuffer())
+
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > limit) {
+      await reader.cancel()
+      throw new GithubError(`The repository is too large to analyze (over ${limit / 1024 / 1024} MB).`, 413)
+    }
+    chunks.push(value)
+  }
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    out.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return out
+}
+
+/**
+ * Downloads the default branch as a single ZIP (one GitHub API request, whatever the
+ * number of files) and extracts, in memory, the manifests and source files the analysis
+ * needs. Fetching files one by one through the Contents API exhausts the 60 requests per
+ * hour allowed without a token and fails for files over 1 MB, such as large lockfiles.
+ *
+ * @throws {GithubError} on 404 (not found / private), 403 or 429 (rate limit), 413 (too large).
+ */
+export async function fetchRepoSnapshot(owner: string, repo: string): Promise<RepoSnapshot> {
+  const url = `${GITHUB_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball`
+  const res = await fetch(url, { headers: authHeaders() })
+
+  if (res.status === 404) {
+    throw new GithubError('Repository not found or is private (404). Make sure the repo is public.', 404)
+  }
+  if (res.status === 403 || res.status === 429) {
+    throw new GithubError(
+      'GitHub API rate limit exceeded. Set the GITHUB_TOKEN environment variable to raise the limit to 5000 req/h.',
+      403,
+    )
+  }
+  if (!res.ok) {
+    throw new GithubError(`GitHub API error: ${res.status} ${res.statusText}`, res.status)
+  }
+
+  const zip = await readLimited(res, MAX_ZIP_BYTES)
+  const tree: TreeEntry[] = []
+  let rootFolder: string | undefined
+
+  let entries: Record<string, Uint8Array>
+  try {
+    entries = unzipSync(zip, {
+      filter(file) {
+        // GitHub wraps everything in one folder: "<owner>-<repo>-<short sha>/".
+        const slash = file.name.indexOf('/')
+        rootFolder ??= file.name.slice(0, slash)
+        const path = file.name.slice(slash + 1)
+        if (!path || path.endsWith('/')) return false
+        tree.push({ path, type: 'blob', sha: '', size: file.originalSize })
+        return shouldExtract(path, file.originalSize)
+      },
+    })
+  } catch (err) {
+    if (err instanceof GithubError) throw err
+    throw new GithubError(`Could not read the repository archive from GitHub (${err instanceof Error ? err.message : String(err)}).`, 502)
+  }
+
+  const decoder = new TextDecoder('utf-8')
+  const files = new Map<string, string>()
+  for (const [name, data] of Object.entries(entries)) {
+    files.set(name.slice(name.indexOf('/') + 1), decoder.decode(data))
+  }
+
+  const commitSha = rootFolder?.match(/-([0-9a-f]{7,40})$/)?.[1]
+  return { tree, files, ...(commitSha ? { commitSha } : {}) }
 }

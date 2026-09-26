@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { parseRepoUrl, fetchRepoTree, fetchFileContent, GithubError } from '@/lib/github'
+import { parseRepoUrl, fetchRepoSnapshot, GithubError } from '@/lib/github'
 import { extractDependencies } from '@/lib/deps-extractor'
 import { lookupCVEsBatch } from '@/lib/osv'
 import { hasResolvedVersion } from '@/lib/dep-key'
@@ -12,8 +12,7 @@ export const runtime = 'nodejs'
 // Large repositories need more than the default function duration on Vercel.
 export const maxDuration = 60
 
-const CODE_EXTENSIONS = /\.(js|jsx|ts|tsx|mjs|cjs|java|py|rb|go|php|cs|cpp|c|h)$/i
-const MAX_FILE_BYTES = 500 * 1024
+const MANIFEST_RE = /(^|\/)(package-lock\.json|pom\.xml)$/
 
 /** A failure of one of the vulnerability databases (OSV.dev or CISA KEV). */
 class UpstreamError extends Error {}
@@ -77,16 +76,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const warnings: string[] = []
 
-    // 3. Fetch repo tree
-    const tree = await fetchRepoTree(owner, repo)
+    // 3. Download the repository as one ZIP (manifests and source files, in memory)
+    const { tree, files } = await fetchRepoSnapshot(owner, repo)
+    const readFile = async (path: string) => {
+      const content = files.get(path)
+      if (content === undefined) throw new Error('the file is too large to analyze')
+      return content
+    }
 
     // 4. Extract dependencies (a manifest that cannot be parsed becomes a warning)
-    const deps = await extractDependencies(
-      tree,
-      (path) => fetchFileContent(owner, repo, path),
-      warnings,
-    )
-    if (!tree.some((e) => /(^|\/)(package-lock\.json|pom\.xml)$/.test(e.path))) {
+    const deps = await extractDependencies(tree, readFile, warnings)
+    if (!tree.some((e) => MANIFEST_RE.test(e.path))) {
       warnings.push(
         'No supported dependency manifest was found. Triage24 reads package-lock.json (v2/v3) and pom.xml.',
       )
@@ -104,29 +104,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .flatMap((c) => c.aliases.filter((id) => id.startsWith('CVE-')))
     const kevHits = matchKev(allCveIds, kevCatalog)
 
-    // 7. SAST analysis — fetch code files < 500 KB
-    const codeFiles = tree.filter(
-      (entry) =>
-        CODE_EXTENSIONS.test(entry.path) &&
-        (entry.size === undefined || entry.size < MAX_FILE_BYTES),
-    )
-    const fetchedFiles = await Promise.all(
-      codeFiles.map(async (entry) => {
-        try {
-          const content = await fetchFileContent(owner, repo, entry.path)
-          return { path: entry.path, content }
-        } catch {
-          return null
-        }
-      }),
-    )
-    const scannedFiles = fetchedFiles.filter((f): f is { path: string; content: string } => f !== null)
-    if (scannedFiles.length < codeFiles.length) {
-      warnings.push(
-        `${codeFiles.length - scannedFiles.length} of ${codeFiles.length} source files could not be downloaded; the code findings are incomplete.`,
-      )
-    }
-    const sastFindings = scanRepo(scannedFiles)
+    // 7. SAST analysis on the source files extracted from the ZIP
+    const sourceFiles = [...files]
+      .filter(([path]) => !MANIFEST_RE.test(path))
+      .map(([path, content]) => ({ path, content }))
+    const sastFindings = scanRepo(sourceFiles)
 
     // 8. Score CRA
     const report = scoreCRA({

@@ -1,26 +1,95 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * Color tokens from the IBM Carbon Design System palette (colors only).
+ * Components use these semantic names instead of raw Tailwind colors.
+ */
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* Interactive */
+  --color-primary: #0f62fe;        /* Blue 60 */
+  --color-primary-hover: #0353e9;  /* Blue 60 hover */
+  --color-primary-active: #002d9c; /* Blue 80 */
+  --color-primary-soft: #edf5ff;   /* Blue 10 */
+  --color-primary-muted: #d0e2ff;  /* Blue 20 */
+  --color-focus: #0f62fe;
+  --color-link: #0f62fe;           /* Blue 60 */
+  --color-link-hover: #0043ce;     /* Blue 70 */
+
+  /* Text */
+  --color-ink: #161616;            /* Gray 100 */
+  --color-ink-secondary: #525252;  /* Gray 70 */
+  --color-ink-helper: #6f6f6f;     /* Gray 60 */
+  --color-ink-inverse: #ffffff;
+  --color-on-bright: #161616;      /* Text on orange and yellow fills */
+
+  /* Surfaces and borders */
+  --color-canvas: #f4f4f4;         /* Gray 10 */
+  --color-layer: #ffffff;
+  --color-layer-hover: #e8e8e8;    /* Gray 10 hover */
+  --color-line: #e0e0e0;           /* Gray 20 */
+  --color-line-strong: #8d8d8d;    /* Gray 50 */
+  --color-header: #161616;         /* Gray 100 */
+
+  /* Support */
+  --color-danger: #da1e28;         /* Red 60 */
+  --color-danger-soft: #fff1f1;    /* Red 10 */
+  --color-warning: #ff832b;        /* Orange 40 */
+  --color-warning-ink: #8a3800;    /* Orange 70 */
+  --color-warning-soft: #fff2e8;   /* Orange 10 */
+  --color-caution: #f1c21b;        /* Yellow 30 */
+  --color-caution-ink: #684e00;    /* Yellow 70 */
+  --color-caution-soft: #fcf4d6;   /* Yellow 10 */
+  --color-success: #24a148;        /* Green 50 */
+  --color-success-ink: #0e6027;    /* Green 70 */
+  --color-success-soft: #defbe6;   /* Green 10 */
+  --color-malicious: #8a3ffc;      /* Purple 60 */
+  --color-malicious-ink: #491d8b;  /* Purple 80 */
+  --color-malicious-soft: #f6f2ff; /* Purple 10 */
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+/* Dark theme: Carbon Gray 100 values. Set by the script in app/layout.tsx. */
+[data-theme='dark'] {
+  color-scheme: dark;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-primary-soft: #0d1a33;
+  --color-primary-muted: #002d9c;  /* Blue 80 */
+  --color-primary-active: #a6c8ff; /* Blue 30 */
+  --color-focus: #ffffff;
+  --color-link: #78a9ff;           /* Blue 40 */
+  --color-link-hover: #a6c8ff;     /* Blue 30 */
+
+  --color-ink: #f4f4f4;            /* Gray 10 */
+  --color-ink-secondary: #c6c6c6;  /* Gray 30 */
+  --color-ink-helper: #8d8d8d;     /* Gray 50 */
+
+  --color-canvas: #161616;         /* Gray 100 */
+  --color-layer: #262626;          /* Gray 90 */
+  --color-layer-hover: #333333;
+  --color-line: #393939;           /* Gray 80 */
+  --color-line-strong: #6f6f6f;    /* Gray 60 */
+  --color-header: #0b0b0b;
+
+  --color-danger-soft: #2c1113;
+  --color-warning-ink: #ffb784;    /* Orange 30 */
+  --color-warning-soft: #2e1b0e;
+  --color-caution-ink: #f1c21b;    /* Yellow 30 */
+  --color-caution-soft: #2b2410;
+  --color-success-ink: #42be65;    /* Green 40 */
+  --color-success-soft: #0f2616;
+  --color-malicious-ink: #d4bbff;  /* Purple 30 */
+  --color-malicious-soft: #221538;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
 }

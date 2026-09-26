@@ -1,113 +1,149 @@
-import type { CRAReport, CVERecord } from '@/types'
+'use client'
 
-type Severity = CVERecord['severity']
+import { useMemo, useState } from 'react'
+import { Bug, ExternalLink, Skull } from 'lucide-react'
+import type { CRAReport } from '@/types'
+import { toFindingRows } from '@/lib/findings'
+import { EmptyState, SeverityTag, Tag } from '@/components/ui'
 
-const SEV_CONFIG: Record<Severity, { bg: string; text: string }> = {
-  CRITICAL: { bg: 'bg-red-600',    text: 'text-white' },
-  HIGH:     { bg: 'bg-orange-500', text: 'text-white' },
-  MEDIUM:   { bg: 'bg-yellow-400', text: 'text-yellow-900' },
-  LOW:      { bg: 'bg-blue-400',   text: 'text-white' },
-  NONE:     { bg: 'bg-gray-300',   text: 'text-gray-700' },
-}
+const PAGE_SIZE = 25
+
+type Filter = 'all' | 'article14'
 
 interface Props {
-  cveFindings: CRAReport['cveFindings']
-  kevFindings: CRAReport['kevFindings']
+  report: Pick<CRAReport, 'cveFindings' | 'kevFindings'>
 }
 
-export default function DepsTable({ cveFindings, kevFindings }: Props) {
-  // Build a set of CVE IDs that are in the KEV catalog
-  const kevCveIds = new Set(kevFindings.map((k) => k.cve.cveId))
+export default function DepsTable({ report }: Props) {
+  const allRows = useMemo(() => toFindingRows(report), [report])
+  const [filter, setFilter] = useState<Filter>('all')
+  const [hideDev, setHideDev] = useState(false)
+  const [limit, setLimit] = useState(PAGE_SIZE)
 
-  // Flatten into rows: one row per (dep, cve) pair
-  const rows = cveFindings.flatMap(({ dep, cves }) =>
-    cves.map((cve) => ({ dep, cve, isKev: kevCveIds.has(cve.cveId) })),
+  const rows = allRows.filter(
+    (row) => (filter === 'all' || row.isKev || row.cve.malicious) && !(hideDev && row.dep.dev),
   )
+  const article14Count = allRows.filter((row) => row.isKev || row.cve.malicious).length
+  const hasDev = allRows.some((row) => row.dep.dev)
 
-  // Also add KEV-only findings that may not appear in cveFindings
-  const cveIdsInFindings = new Set(rows.map((r) => r.cve.cveId))
-  for (const { dep, cve } of kevFindings) {
-    if (!cveIdsInFindings.has(cve.cveId)) {
-      rows.push({ dep, cve, isKev: true })
-    }
-  }
-
-  if (rows.length === 0) {
-    return (
-      <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
-        ✅ No vulnerable dependencies detected.
-      </div>
-    )
+  if (allRows.length === 0) {
+    return <EmptyState>No vulnerable dependencies detected.</EmptyState>
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200">
-      <table className="min-w-full text-sm">
-        <thead className="bg-gray-50 text-xs font-semibold text-gray-600 uppercase tracking-wide">
-          <tr>
-            <th className="px-4 py-3 text-left">Dependency</th>
-            <th className="px-4 py-3 text-left">Version</th>
-            <th className="px-4 py-3 text-left">Ecosystem</th>
-            <th className="px-4 py-3 text-left">CVE</th>
-            <th className="px-4 py-3 text-left">Severity</th>
-            <th className="px-4 py-3 text-left">CVSS</th>
-            <th className="px-4 py-3 text-left">Exploitation</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100 bg-white">
-          {rows.map((row, i) => {
-            const sev = SEV_CONFIG[row.cve.severity]
-            return (
-              <tr key={`${row.dep.name}-${row.cve.cveId}-${i}`} className="hover:bg-gray-50 transition-colors">
-                <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
-                  {row.dep.name}
-                  {row.dep.dev && (
-                    <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-normal text-gray-500">dev</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 font-mono text-gray-600 whitespace-nowrap">{row.dep.version}</td>
-                <td className="px-4 py-3 text-gray-500 capitalize">{row.dep.ecosystem}</td>
-                <td className="px-4 py-3 font-mono whitespace-nowrap">
-                  <a
-                    href={`https://osv.dev/vulnerability/${encodeURIComponent(row.cve.osvIds[0] ?? row.cve.cveId)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline"
-                  >
-                    {row.cve.cveId}
-                  </a>
-                </td>
-                <td className="px-4 py-3">
-                  <span
-                    className={[
-                      'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold',
-                      sev.bg, sev.text,
-                    ].join(' ')}
-                  >
-                    {row.cve.severity}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
-                  {row.cve.cvssScore !== null ? row.cve.cvssScore.toFixed(1) : '—'}
-                </td>
-                <td className="px-4 py-3">
-                  {row.cve.malicious ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 text-purple-800 px-2.5 py-0.5 text-xs font-bold">
-                      ☠️ Malicious release
-                    </span>
-                  ) : row.isKev ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-red-100 text-red-700 px-2.5 py-0.5 text-xs font-bold">
-                      🚨 CISA KEV
-                    </span>
-                  ) : (
-                    <span className="text-gray-400 text-xs">—</span>
-                  )}
-                </td>
+    <div className="space-y-3">
+      {/* ── Toolbar ── */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex border border-line-strong" role="group" aria-label="Filter findings">
+          {(
+            [
+              ['all', `All (${allRows.length})`],
+              ['article14', `Article 14 (${article14Count})`],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={filter === value}
+              onClick={() => {
+                setFilter(value)
+                setLimit(PAGE_SIZE)
+              }}
+              className={[
+                'px-3 py-1.5 text-sm',
+                filter === value ? 'bg-primary text-ink-inverse' : 'bg-layer text-ink-secondary hover:bg-layer-hover',
+              ].join(' ')}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {hasDev && (
+          <label className="flex items-center gap-2 text-sm text-ink-secondary">
+            <input
+              type="checkbox"
+              checked={hideDev}
+              onChange={(e) => setHideDev(e.target.checked)}
+              className="h-4 w-4 accent-primary"
+            />
+            Hide development dependencies
+          </label>
+        )}
+      </div>
+
+      {rows.length === 0 ? (
+        <EmptyState>No findings match this filter.</EmptyState>
+      ) : (
+        <div className="overflow-x-auto border border-line bg-layer">
+          <table className="min-w-full text-sm">
+            <thead className="bg-line/60 text-left text-xs font-semibold text-ink">
+              <tr>
+                <th className="px-4 py-3">Dependency</th>
+                <th className="px-4 py-3">Version</th>
+                <th className="px-4 py-3">Vulnerability</th>
+                <th className="px-4 py-3">Severity</th>
+                <th className="px-4 py-3 text-right">CVSS</th>
+                <th className="px-4 py-3">Exploitation</th>
               </tr>
-            )
-          })}
-        </tbody>
-      </table>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {rows.slice(0, limit).map((row, i) => (
+                <tr key={`${row.dep.name}-${row.dep.version}-${row.cve.cveId}-${i}`} className="hover:bg-canvas">
+                  <td className="px-4 py-3 font-medium text-ink">
+                    <span className="font-mono">{row.dep.name}</span>
+                    {row.dep.dev && (
+                      <span className="ml-2 rounded-full bg-line px-2 py-0.5 text-xs font-normal text-ink-secondary">dev</span>
+                    )}
+                    <span className="ml-2 text-xs font-normal text-ink-helper">{row.dep.ecosystem}</span>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 font-mono text-ink-secondary">{row.dep.version}</td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    <a
+                      href={`https://osv.dev/vulnerability/${encodeURIComponent(row.cve.osvIds[0] ?? row.cve.cveId)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={row.cve.description}
+                      className="inline-flex items-center gap-1 font-mono text-link hover:text-link-hover hover:underline"
+                    >
+                      {row.cve.cveId}
+                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                    </a>
+                  </td>
+                  <td className="px-4 py-3">
+                    <SeverityTag severity={row.cve.severity} />
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono text-ink-secondary">
+                    {row.cve.cvssScore !== null ? row.cve.cvssScore.toFixed(1) : '—'}
+                  </td>
+                  <td className="px-4 py-3">
+                    {row.cve.malicious ? (
+                      <Tag tone="malicious" icon={Skull}>
+                        Malicious release
+                      </Tag>
+                    ) : row.isKev ? (
+                      <Tag tone="danger" icon={Bug}>
+                        CISA KEV
+                      </Tag>
+                    ) : (
+                      <span className="text-xs text-ink-helper">Not known</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {rows.length > limit && (
+        <button
+          type="button"
+          onClick={() => setLimit((n) => n + PAGE_SIZE * 4)}
+          className="text-sm text-link hover:text-link-hover hover:underline"
+        >
+          Show more ({rows.length - limit} remaining)
+        </button>
+      )}
     </div>
   )
 }

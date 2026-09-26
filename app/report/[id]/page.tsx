@@ -3,10 +3,13 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import { ArrowLeft, Download, Loader2, Plus, SearchX } from 'lucide-react'
 import type { CRAReport } from '@/types'
 import ReportSummary from '@/components/ReportSummary'
 import DepsTable from '@/components/DepsTable'
 import SastFindings from '@/components/SastFindings'
+import { AppFooter, AppHeader, InlineNotification, Section } from '@/components/ui'
+import { formatDateTime } from '@/lib/format'
 import { loadReportFromBrowser, saveReportInBrowser } from '@/lib/report-storage'
 
 type LoadState =
@@ -36,6 +39,21 @@ async function loadReport(id: string): Promise<LoadState> {
   }
 }
 
+/** Saves the full report as JSON, as a record of what was found and when. */
+function downloadReport(report: CRAReport) {
+  const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `triage24-report-${report.analyzedAt.slice(0, 10)}-${report.reportId.slice(0, 8)}.json`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function repoLabel(url: string): string {
+  return url.replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\/$/, '')
+}
+
 export default function ReportPage() {
   const { id } = useParams<{ id: string }>()
   const [state, setState] = useState<LoadState>({ status: 'loading' })
@@ -50,155 +68,138 @@ export default function ReportPage() {
     }
   }, [id])
 
-  if (state.status === 'loading') {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 text-sm text-gray-500">
-        Loading report…
-      </div>
-    )
-  }
-
-  if (state.status !== 'ready') {
-    return (
-      <ErrorLayout>
-        <p className="text-red-700 font-medium">
-          {state.status === 'missing'
-            ? 'This report is not available. Reports are kept only in the browser session where the analysis ran; run the analysis again.'
-            : 'An unexpected error occurred while loading this report. Please try again.'}
-        </p>
-        <Link href="/" className="mt-4 inline-block text-sm text-blue-600 hover:underline">
-          ← Back to home
-        </Link>
-      </ErrorLayout>
-    )
-  }
-
-  const report = state.report
-  const totalVulns = report.cveFindings.reduce((acc, f) => acc + f.cves.length, 0)
-
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50">
-      {/* ── Header ── */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <Link href="/" className="text-xl font-bold text-blue-700 tracking-tight hover:opacity-80 transition-opacity">
-            triage24
-          </Link>
-          <span className="text-xs text-gray-500">
-            Report ID: <code className="font-mono">{report.reportId}</code>
-          </span>
-        </div>
-      </header>
+    <div className="flex min-h-screen flex-col">
+      <AppHeader>
+        <Link href="/" className="flex items-center gap-1.5 text-sm text-ink-inverse/80 hover:text-ink-inverse">
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          New analysis
+        </Link>
+      </AppHeader>
 
-      <main className="flex-1 px-6 py-10">
-        <div className="max-w-4xl mx-auto space-y-10">
-          {/* ── Meta ── */}
-          <div>
-            <p className="text-xs text-gray-400 mb-1">
-              Analyzed at {new Date(report.analyzedAt).toLocaleString()}
-            </p>
-            <h1 className="text-2xl font-bold text-gray-900">CRA Art. 14 Compliance Report</h1>
+      <main className="mx-auto w-full min-w-0 max-w-6xl flex-1 px-4 py-8 sm:px-6">
+        {state.status === 'loading' && (
+          <p className="flex items-center gap-2 text-sm text-ink-secondary">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            Loading report…
+          </p>
+        )}
+
+        {(state.status === 'missing' || state.status === 'error') && (
+          <div className="max-w-2xl space-y-4">
+            <InlineNotification
+              kind={state.status === 'missing' ? 'info' : 'error'}
+              title={state.status === 'missing' ? 'This report is not available' : 'The report could not be loaded'}
+            >
+              <p>
+                {state.status === 'missing'
+                  ? 'Reports are kept only in the browser session where the analysis ran. Run the analysis again to see it.'
+                  : 'An unexpected error occurred. Please try again.'}
+              </p>
+            </InlineNotification>
+            <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-link hover:underline">
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              Back to the analysis
+            </Link>
           </div>
+        )}
 
-          {/* ── Summary ── */}
-          <Section title="Summary">
-            <ReportSummary report={report} />
-          </Section>
-
-          {/* ── Vulnerable dependencies ── */}
-          <Section
-            title="Vulnerable Dependencies"
-            badge={totalVulns > 0 ? String(totalVulns) : undefined}
-            badgeColor={totalVulns > 0 ? 'red' : 'green'}
-          >
-            <DepsTable
-              cveFindings={report.cveFindings}
-              kevFindings={report.kevFindings}
-            />
-          </Section>
-
-          {/* ── Coverage notes ── */}
-          {(report.unresolvedDeps.length > 0 || report.warnings.length > 0) && (
-            <Section title="Not checked">
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
-                {report.unresolvedDeps.length > 0 && (
-                  <p>
-                    {report.unresolvedDeps.length} dependencies have a version that could not be resolved (for
-                    example, one inherited from a parent POM) and were not checked:{' '}
-                    <span className="font-mono text-xs">{report.unresolvedDeps.join(', ')}</span>
-                  </p>
-                )}
-                {report.warnings.map((warning, i) => (
-                  <p key={i}>{warning}</p>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          {/* ── SAST findings ── */}
-          <Section
-            title="SAST Findings"
-            badge={report.sastFindings.length > 0 ? String(report.sastFindings.length) : undefined}
-            badgeColor={report.sastFindings.length > 0 ? 'orange' : 'green'}
-          >
-            <SastFindings findings={report.sastFindings} />
-          </Section>
-        </div>
+        {state.status === 'ready' && <Report report={state.report} />}
       </main>
 
-      {/* ── Footer ── */}
-      <footer className="border-t border-gray-200 bg-white py-6 text-center text-xs text-gray-400">
-        <p>triage24 — EU Cyber Resilience Act Article 14 compliance agent</p>
-        <p className="mt-1 font-medium text-gray-500">Drafting and triage assistant. Not legal advice.</p>
-      </footer>
+      <AppFooter />
     </div>
   )
 }
 
-// ── Reusable section wrapper ───────────────────────────────────────────────────
-
-function Section({
-  title,
-  badge,
-  badgeColor = 'gray',
-  children,
-}: {
-  title: string
-  badge?: string
-  badgeColor?: 'red' | 'orange' | 'green' | 'gray'
-  children: React.ReactNode
-}) {
-  const badgeClasses: Record<string, string> = {
-    red:    'bg-red-100 text-red-700',
-    orange: 'bg-orange-100 text-orange-700',
-    green:  'bg-green-100 text-green-700',
-    gray:   'bg-gray-100 text-gray-600',
-  }
+function Report({ report }: { report: CRAReport }) {
+  const totalVulns = report.cveFindings.reduce((acc, f) => acc + f.cves.length, 0)
+  const tiles = [
+    { label: 'Article 14 findings', value: report.notifications.length, alert: report.notifications.length > 0 },
+    { label: 'Actively exploited (KEV)', value: report.kevFindings.length, alert: report.kevFindings.length > 0 },
+    { label: 'Malicious releases', value: report.maliciousFindings.length, alert: report.maliciousFindings.length > 0 },
+    { label: 'Vulnerable dependencies', value: report.cveFindings.length, alert: false },
+    { label: 'Known vulnerabilities', value: totalVulns, alert: false },
+    { label: 'Code findings', value: report.sastFindings.length, alert: false },
+  ]
 
   return (
-    <section className="space-y-4">
-      <div className="flex items-center gap-2">
-        <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
-        {badge !== undefined && (
-          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold ${badgeClasses[badgeColor]}`}>
-            {badge}
-          </span>
-        )}
+    <div className="space-y-10">
+      {/* ── Title ── */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-xs text-ink-helper">CRA Article 14 report · analyzed {formatDateTime(report.analyzedAt)}</p>
+          <h1 className="mt-1 break-all text-2xl font-semibold text-ink sm:text-3xl">
+            <a href={report.repoUrl} target="_blank" rel="noopener noreferrer" className="hover:text-link">
+              {repoLabel(report.repoUrl)}
+            </a>
+          </h1>
+        </div>
+        <button
+          type="button"
+          onClick={() => downloadReport(report)}
+          className="flex h-10 items-center gap-6 border border-primary px-4 text-sm font-medium text-link hover:bg-primary hover:text-ink-inverse"
+        >
+          Download JSON
+          <Download className="h-4 w-4" aria-hidden="true" />
+        </button>
       </div>
-      {children}
-    </section>
-  )
-}
 
-// ── Error layout helper ────────────────────────────────────────────────────────
+      {/* ── Key figures ── */}
+      <dl className="grid grid-cols-2 gap-px border border-line bg-line sm:grid-cols-3 lg:grid-cols-6">
+        {tiles.map((tile) => (
+          <div key={tile.label} className="bg-layer p-4">
+            <dt className="text-xs text-ink-helper">{tile.label}</dt>
+            <dd className={`mt-1 text-3xl font-light ${tile.alert ? 'text-danger' : 'text-ink'}`}>{tile.value}</dd>
+          </div>
+        ))}
+      </dl>
 
-function ErrorLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col min-h-screen bg-gray-50 items-center justify-center px-6">
-      <div className="max-w-md w-full bg-white rounded-xl border border-red-200 p-8 text-center space-y-3">
-        <p className="text-2xl font-bold text-red-600">Error</p>
-        {children}
-      </div>
+      <Section title="Article 14 assessment">
+        <ReportSummary report={report} />
+      </Section>
+
+      <Section
+        title="Known vulnerabilities"
+        count={totalVulns}
+        description="Most urgent first: malicious releases, then actively exploited vulnerabilities, then by severity."
+      >
+        <DepsTable report={report} />
+      </Section>
+
+      {(report.unresolvedDeps.length > 0 || report.warnings.length > 0) && (
+        <Section title="Not checked">
+          <InlineNotification kind="warning" title="Part of the repository could not be analyzed">
+            {report.unresolvedDeps.length > 0 && (
+              <p>
+                {report.unresolvedDeps.length} dependencies have a version that could not be resolved (for example,
+                one inherited from a parent POM):{' '}
+                <span className="font-mono text-xs">{report.unresolvedDeps.join(', ')}</span>
+              </p>
+            )}
+            {report.warnings.map((warning, i) => (
+              <p key={i} className="mt-1">
+                {warning}
+              </p>
+            ))}
+          </InlineNotification>
+        </Section>
+      )}
+
+      <Section
+        title="Code findings"
+        count={report.sastFindings.length}
+        description="Pattern-based checks of the source code. They do not trigger Article 14 notifications on their own."
+      >
+        <SastFindings findings={report.sastFindings} />
+      </Section>
+
+      {report.cveFindings.length === 0 && report.notifications.length === 0 && report.sastFindings.length === 0 && (
+        <p className="flex items-center gap-2 text-sm text-ink-helper">
+          <SearchX className="h-4 w-4" aria-hidden="true" />
+          Nothing to report for this repository.
+        </p>
+      )}
     </div>
   )
 }

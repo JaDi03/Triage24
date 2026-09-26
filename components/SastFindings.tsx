@@ -1,80 +1,76 @@
+'use client'
+
+import { useState } from 'react'
+import { FileCode2, Lightbulb } from 'lucide-react'
 import type { SastFinding } from '@/types'
+import { EmptyState, Tag, type Tone } from '@/components/ui'
 
-const SEV_CONFIG: Record<SastFinding['severity'], { bg: string; text: string }> = {
-  CRITICAL: { bg: 'bg-red-600',    text: 'text-white' },
-  HIGH:     { bg: 'bg-orange-500', text: 'text-white' },
-  MEDIUM:   { bg: 'bg-yellow-400', text: 'text-yellow-900' },
-  LOW:      { bg: 'bg-blue-400',   text: 'text-white' },
+const PAGE_SIZE = 10
+
+const SEVERITY_TONE: Record<SastFinding['severity'], Tone> = {
+  CRITICAL: 'danger',
+  HIGH: 'warning',
+  MEDIUM: 'caution',
+  LOW: 'primary',
 }
 
-interface Props {
-  findings: SastFinding[]
-}
+export default function SastFindings({ findings }: { findings: SastFinding[] }) {
+  const [limit, setLimit] = useState(PAGE_SIZE)
 
-export default function SastFindings({ findings }: Props) {
   if (findings.length === 0) {
-    return (
-      <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
-        ✅ No SAST findings detected.
-      </div>
-    )
+    return <EmptyState>No code findings detected.</EmptyState>
   }
 
   return (
-    <ul className="space-y-3" role="list">
-      {findings.map((finding, i) => {
-        const sev = SEV_CONFIG[finding.severity]
-        return (
+    <div className="space-y-3">
+      <ul className="space-y-3" role="list">
+        {findings.slice(0, limit).map((finding, i) => (
           <li
             key={`${finding.filePath}-${finding.line}-${finding.ruleId}-${i}`}
-            className="rounded-lg border border-gray-200 bg-white overflow-hidden"
+            className="border border-line bg-layer"
           >
-            {/* ── Header ── */}
-            <div className="flex flex-wrap items-center gap-2 bg-gray-50 px-4 py-2 border-b border-gray-200">
-              <span
-                className={[
-                  'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold',
-                  sev.bg, sev.text,
-                ].join(' ')}
-              >
-                {finding.severity}
-              </span>
-              <code className="text-xs font-mono text-gray-700 bg-gray-100 rounded px-1.5 py-0.5">
-                {finding.ruleId}
-              </code>
-              <span className="text-xs font-semibold text-gray-800">{finding.ruleName}</span>
+            <div className="flex flex-wrap items-center gap-2 border-b border-line bg-canvas px-4 py-2">
+              <Tag tone={SEVERITY_TONE[finding.severity]}>{finding.severity}</Tag>
+              <code className="text-xs text-ink-helper">{finding.ruleId}</code>
+              <span className="text-sm font-medium text-ink">{finding.ruleName}</span>
             </div>
 
-            {/* ── Body ── */}
-            <div className="px-4 py-3 space-y-2">
-              {/* File + line */}
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-3-3v6M4 6h16M4 18h16" />
-                </svg>
-                <code className="font-mono break-all">{finding.filePath}</code>
-                <span className="text-gray-400">line {finding.line}</span>
-              </div>
+            <div className="space-y-3 px-4 py-3">
+              <p className="flex items-center gap-2 text-xs text-ink-secondary">
+                <FileCode2 className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                <code className="break-all font-mono">{finding.filePath}</code>
+                <span className="text-ink-helper">line {finding.line}</span>
+              </p>
 
-              {/* Snippet */}
               {finding.snippet && (
-                <pre className="text-xs font-mono bg-gray-900 text-green-400 rounded p-3 overflow-x-auto whitespace-pre-wrap break-all">
+                <pre className="overflow-x-auto whitespace-pre-wrap break-all bg-header p-3 font-mono text-xs text-ink-inverse">
                   {finding.snippet}
                 </pre>
               )}
 
-              {/* Description */}
-              <p className="text-sm text-gray-700">{finding.description}</p>
+              <p className="text-sm text-ink-secondary">{finding.description}</p>
 
-              {/* Recommendation */}
-              <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2">
-                <p className="text-xs font-semibold text-blue-700 mb-0.5">💡 Recommendation</p>
-                <p className="text-sm text-blue-800">{finding.recommendation}</p>
+              <div className="flex gap-2 border-l-4 border-primary bg-primary-soft px-3 py-2">
+                <Lightbulb className="mt-0.5 h-4 w-4 flex-shrink-0 text-link" aria-hidden="true" />
+                <p className="text-sm text-ink">
+                  <span className="font-medium">Recommendation: </span>
+                  {finding.recommendation}
+                </p>
               </div>
             </div>
           </li>
-        )
-      })}
-    </ul>
+        ))}
+      </ul>
+
+      {findings.length > limit && (
+        <button
+          type="button"
+          onClick={() => setLimit((n) => n + PAGE_SIZE)}
+          className="text-sm text-link hover:text-link-hover hover:underline"
+        >
+          Show more ({findings.length - limit} remaining)
+        </button>
+      )}
+    </div>
   )
 }

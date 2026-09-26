@@ -1,43 +1,66 @@
 'use client'
 
-import { useState, FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { ArrowRight, Loader2 } from 'lucide-react'
 import { parseRepoUrl } from '@/lib/github'
 import { saveReportInBrowser } from '@/lib/report-storage'
 import type { CRAReport } from '@/types'
+
+/** Public repositories with known results, for a quick first run. */
+const EXAMPLES = [
+  { label: 'Log4Shell demo (Java)', url: 'https://github.com/aaronm-sysdig/log4j-vuln-demo' },
+  { label: 'WebVulnLab (Spring + Log4j)', url: 'https://github.com/sil3ntH4ck3r/WebVulnLab' },
+  { label: 'OWASP NodeGoat (Node.js)', url: 'https://github.com/OWASP/NodeGoat' },
+]
+
+const STEPS = [
+  'Downloading the repository',
+  'Reading package-lock.json and pom.xml',
+  'Checking OSV.dev and the CISA KEV catalog',
+  'Applying CRA Article 14',
+]
+
+function validate(value: string): string | null {
+  if (!value.trim()) return 'Enter a GitHub repository URL.'
+  try {
+    // Same rules as the API: github.com only, with or without https://, .git or /tree/<ref>.
+    parseRepoUrl(value)
+    return null
+  } catch {
+    return 'Enter a github.com repository URL, for example https://github.com/owner/repo'
+  }
+}
 
 export default function RepoForm() {
   const router = useRouter()
   const [url, setUrl] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
 
-  function validate(value: string): string | null {
-    if (!value.trim()) return 'Please enter a GitHub repository URL.'
-    try {
-      // Same rules as the API: github.com only, with or without https://, .git or /tree/<ref>.
-      parseRepoUrl(value)
-      return null
-    } catch {
-      return 'Must be a valid GitHub URL, e.g. https://github.com/owner/repo'
-    }
-  }
+  useEffect(() => {
+    if (!loading) return
+    const started = Date.now()
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => clearInterval(timer)
+  }, [loading])
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    const validationError = validate(url)
+  async function analyze(value: string) {
+    const validationError = validate(value)
     if (validationError) {
       setError(validationError)
       return
     }
     setError(null)
+    setElapsed(0)
     setLoading(true)
 
     try {
       const res = await fetch('/api/audit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify({ url: value.trim() }),
       })
 
       const data = (await res.json().catch(() => null)) as
@@ -54,18 +77,23 @@ export default function RepoForm() {
       saveReportInBrowser(data.report)
       router.push(`/report/${data.reportId}`)
     } catch {
-      setError('Network error — please try again.')
+      setError('Network error. Please try again.')
       setLoading(false)
     }
   }
 
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    void analyze(url)
+  }
+
   return (
-    <form onSubmit={handleSubmit} noValidate className="w-full max-w-xl mx-auto">
-      <div className="flex flex-col gap-3">
-        <label htmlFor="repo-url" className="sr-only">
-          GitHub repository URL
+    <div className="space-y-4">
+      <form onSubmit={handleSubmit} noValidate>
+        <label htmlFor="repo-url" className="mb-2 block text-xs font-medium text-ink-secondary">
+          Public GitHub repository
         </label>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-px sm:flex-row">
           <input
             id="repo-url"
             type="url"
@@ -79,44 +107,62 @@ export default function RepoForm() {
             aria-invalid={!!error}
             aria-describedby={error ? 'repo-url-error' : undefined}
             className={[
-              'flex-1 rounded-lg border px-4 py-3 text-sm outline-none transition-colors',
-              'bg-white text-gray-900 placeholder:text-gray-400',
-              'focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
-              error ? 'border-red-400' : 'border-gray-300',
-              loading ? 'opacity-60 cursor-not-allowed' : '',
+              'h-12 flex-1 border-b-2 bg-canvas px-4 text-sm text-ink outline-none placeholder:text-ink-helper',
+              'focus:border-primary disabled:cursor-not-allowed disabled:opacity-60',
+              error ? 'border-danger' : 'border-line-strong',
             ].join(' ')}
           />
           <button
             type="submit"
             disabled={loading}
-            className={[
-              'flex items-center gap-2 rounded-lg px-5 py-3 text-sm font-semibold text-white transition-colors',
-              'bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
-              loading ? 'opacity-70 cursor-not-allowed' : '',
-            ].join(' ')}
+            className="flex h-12 items-center justify-between gap-8 bg-primary px-4 text-sm font-medium text-ink-inverse hover:bg-primary-hover active:bg-primary-active disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {loading && (
-              <svg
-                className="animate-spin h-4 w-4"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-              </svg>
+            {loading ? 'Analyzing…' : 'Analyze repository'}
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
             )}
-            {loading ? 'Scanning…' : 'Scan Repository'}
           </button>
         </div>
 
         {error && (
-          <p id="repo-url-error" role="alert" className="text-sm text-red-600">
+          <p id="repo-url-error" role="alert" className="mt-2 text-sm text-danger">
             {error}
           </p>
         )}
-      </div>
-    </form>
+      </form>
+
+      {loading ? (
+        <div role="status" className="border border-line bg-canvas p-4 text-sm text-ink-secondary">
+          <p className="font-medium text-ink">Analyzing — usually 5 to 20 seconds ({elapsed} s)</p>
+          <ul className="mt-2 space-y-1">
+            {STEPS.map((step) => (
+              <li key={step} className="flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
+                {step}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-ink-helper">Try an example:</span>
+          {EXAMPLES.map((example) => (
+            <button
+              key={example.url}
+              type="button"
+              onClick={() => {
+                setUrl(example.url)
+                void analyze(example.url)
+              }}
+              className="border border-line bg-layer px-3 py-1 text-ink-secondary hover:border-primary hover:text-link"
+            >
+              {example.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

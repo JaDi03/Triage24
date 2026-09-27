@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { toFindingRows } from '@/lib/findings'
 import { formatRemaining } from '@/lib/format'
+import { normalizeReport } from '@/lib/report-storage'
 import type { CVERecord, Dependency } from '@/types'
 
 function cve(cveId: string, severity: CVERecord['severity'], cvssScore: number | null, malicious = false): CVERecord {
@@ -64,5 +65,16 @@ describe('formatRemaining', () => {
 
   it('shows how long a deadline is overdue', () => {
     expect(formatRemaining('2026-09-26T05:57:00Z', now)).toBe('overdue by 2 h 3 min')
+  })
+})
+
+describe('normalizeReport', () => {
+  it('fills the fields that reports from earlier versions lack', () => {
+    const old = { reportId: 'r1', repoUrl: 'https://github.com/a/b', craStatus: 'report_required' as const }
+    const report = normalizeReport(old)
+    expect(report.drafts).toEqual([])
+    expect(report.remediations).toEqual([])
+    expect(report.notifications).toEqual([])
+    expect(report.craStatus).toBe('report_required')
   })
 })

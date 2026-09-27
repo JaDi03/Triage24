@@ -12,7 +12,7 @@ import DraftsPanel from '@/components/DraftsPanel'
 import FixWithBob from '@/components/FixWithBob'
 import { AppFooter, AppHeader, InlineNotification, Section } from '@/components/ui'
 import { formatDateTime } from '@/lib/format'
-import { loadReportFromBrowser, saveReportInBrowser } from '@/lib/report-storage'
+import { loadReportFromBrowser, normalizeReport, saveReportInBrowser } from '@/lib/report-storage'
 
 type LoadState =
   | { status: 'loading' }
@@ -33,7 +33,7 @@ async function loadReport(id: string): Promise<LoadState> {
     const res = await fetch(`/api/report/${encodeURIComponent(id)}`, { cache: 'no-store' })
     if (res.status === 404) return { status: 'missing' }
     if (!res.ok) return { status: 'error' }
-    const report = (await res.json()) as CRAReport
+    const report = normalizeReport((await res.json()) as CRAReport)
     saveReportInBrowser(report)
     return { status: 'ready', report }
   } catch {

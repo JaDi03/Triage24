@@ -16,6 +16,16 @@ export interface Dependency {
   dev?: boolean
   /** Only installed on these operating systems (npm lockfile "os", e.g. ["darwin"]). */
   os?: string[]
+  /** Manifest that declares it (package-lock.json or pom.xml path). */
+  manifestPath?: string
+  /** Declared by the project itself rather than pulled in by another dependency. */
+  direct?: boolean
+}
+
+/** An OSV range for one package: events in the order OSV lists them. */
+export interface AffectedRange {
+  type: string
+  events: Array<{ introduced?: string; fixed?: string; last_affected?: string; limit?: string }>
 }
 
 export interface CVERecord {
@@ -32,6 +42,34 @@ export interface CVERecord {
   publishedDate: string
   /** The release contains malicious code (OSV MAL-* record or CWE-506). */
   malicious: boolean
+  /** Advisory text (trimmed), used to find the vulnerable functions. */
+  details?: string
+  /** Affected ranges and explicit versions for this package, from every merged advisory. */
+  affectedRanges?: AffectedRange[]
+  affectedVersions?: string[]
+  /** Whether the project's code reaches the vulnerable functionality. */
+  reachability?: Reachability
+}
+
+export interface Evidence {
+  file: string
+  line: number
+  snippet: string
+}
+
+export interface Reachability {
+  verdict: 'affected' | 'not_affected' | 'uncertain'
+  /** 0 to 1. */
+  confidence: number
+  reasoning: string
+  /** Code or manifest lines behind the verdict. */
+  evidence: Evidence[]
+  method: 'static'
+  /** Functions or classes searched for, and where their names came from. */
+  symbols: string[]
+  symbolSource: 'curated' | 'advisory' | 'none'
+  importCount: number
+  usageCount: number
 }
 
 export interface KevEntry {
@@ -72,7 +110,8 @@ export type CraStatus = 'report_required' | 'review_required' | 'not_required'
 
 export interface CraNotification {
   category: CraCategory
-  status: Exclude<CraStatus, 'not_required'>
+  /** not_required: actively exploited, but the code does not reach it (an interpretation of Art. 3(40)). */
+  status: CraStatus
   dep: Dependency
   cve: CVERecord
   /** CISA KEV entry, for actively exploited vulnerabilities. */
@@ -81,6 +120,34 @@ export interface CraNotification {
   legalBasis: string
   /** Why the finding was classified this way. */
   reason: string
+  /** Set when the classification relies on an interpretation of the Regulation. */
+  interpretation?: string
+}
+
+/** The three documents for one Article 14 duty, with placeholders for what only the manufacturer knows. */
+export interface CraDrafts {
+  category: CraCategory
+  /** Art. 14(2)(a) or 14(4)(a). */
+  earlyWarning: string
+  /** Art. 14(2)(b) or 14(4)(b). */
+  notification: string
+  /** Art. 14(8). */
+  userAdvisory: string
+  /** When the final report is due: Art. 14(2)(c) or 14(4)(c). */
+  finalReportRule: string
+}
+
+/** A dependency that needs action, with its fix and the instruction for IBM Bob. */
+export interface Remediation {
+  dep: Dependency
+  /** Vulnerabilities that are not ruled out by the reachability analysis. */
+  cveIds: string[]
+  /** Lowest release not affected by any of its advisories; undefined when none is known. */
+  recommendedVersion?: string
+  /** Other artifacts of the same Maven group and version that must move together. */
+  alignedWith: string[]
+  /** Ready-to-paste instruction for IBM Bob. */
+  fixPrompt: string
 }
 
 /** Art. 14(2)(a)-(b) and 14(4)(a)-(b): maximum periods, counted from when the manufacturer becomes aware. */
@@ -96,6 +163,8 @@ export interface CraDeadlines {
 export interface CRAReport {
   reportId: string
   repoUrl: string
+  /** Short commit SHA of the analyzed revision, for links to the code. */
+  commitSha?: string
   analyzedAt: string
   /** Technical risk from severities, KEV and malicious releases. Not a legal classification. */
   overallRisk: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'PASS'
@@ -105,6 +174,10 @@ export interface CRAReport {
   notifications: CraNotification[]
   /** Deadlines of the early warning and the notification; null when nothing falls under Art. 14. */
   deadlines: CraDeadlines | null
+  /** One set of drafts per Art. 14 duty that applies. */
+  drafts: CraDrafts[]
+  /** Dependencies to fix, most urgent first. */
+  remediations: Remediation[]
   hasSBOM: boolean
   hasSecurityPolicy: boolean
   /** craStatus === 'report_required'. */

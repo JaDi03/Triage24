@@ -6,6 +6,7 @@ import { hasResolvedVersion } from '@/lib/dep-key'
 import { downloadKevCatalog, matchKev } from '@/lib/kev'
 import { scanRepo } from '@/lib/sast'
 import { scoreCRA } from '@/lib/cra-scorer'
+import { analyzeReachability } from '@/lib/reachability'
 import { cacheReport } from '@/lib/report-cache'
 
 export const runtime = 'nodejs'
@@ -77,7 +78,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const warnings: string[] = []
 
     // 3. Download the repository as one ZIP (manifests and source files, in memory)
-    const { tree, files } = await fetchRepoSnapshot(owner, repo)
+    const { tree, files, commitSha } = await fetchRepoSnapshot(owner, repo)
     const readFile = async (path: string) => {
       const content = files.get(path)
       if (content === undefined) throw new Error('the file is too large to analyze')
@@ -104,25 +105,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .flatMap((c) => c.aliases.filter((id) => id.startsWith('CVE-')))
     const kevHits = matchKev(allCveIds, kevCatalog)
 
-    // 7. SAST analysis on the source files extracted from the ZIP
-    const sourceFiles = [...files]
-      .filter(([path]) => !MANIFEST_RE.test(path))
-      .map(([path, content]) => ({ path, content }))
-    const sastFindings = scanRepo(sourceFiles)
+    // 7. Reachability: does the code reach the vulnerable functionality?
+    const sources = [...files].map(([path, content]) => ({ path, content }))
+    const cveMap = analyzeReachability(sources, deps, osv.byDependency, new Set(kevHits.map((k) => k.cveID)))
 
-    // 8. Score CRA
+    // 8. SAST analysis on the source files extracted from the ZIP
+    const sastFindings = scanRepo(sources.filter((file) => !MANIFEST_RE.test(file.path)))
+
+    // 9. Score CRA, with drafts and fixes
     const report = scoreCRA({
       repoUrl: url,
       tree,
       deps,
-      cveMap: osv.byDependency,
+      cveMap,
       kevHits,
       sastFindings,
       unresolvedDeps,
       warnings,
+      ...(commitSha ? { commitSha } : {}),
     })
 
-    // 9. Cache and respond
+    // 10. Cache and respond
     cacheReport(report)
     return NextResponse.json({ reportId: report.reportId, report }, { status: 200 })
   } catch (err) {

@@ -14,6 +14,8 @@ const MOCK_REPORT: CRAReport = {
   craStatus: 'not_required',
   notifications: [],
   deadlines: null,
+  drafts: [],
+  remediations: [],
   hasSBOM: false,
   hasSecurityPolicy: true,
   disclosureRequired: false,

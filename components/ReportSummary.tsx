@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Bug, CircleSlash, FileCheck2, FileX2, Gauge, ShieldAlert, Skull } from 'lucide-react'
+import { Bug, CircleCheck, CircleSlash, FileCheck2, FileX2, Gauge, Scale, ShieldAlert, Skull } from 'lucide-react'
 import type { CRAReport, CraNotification, CraStatus } from '@/types'
 import { ExternalTextLink, InlineNotification, Tag, type NotificationKind } from '@/components/ui'
+import { EvidenceList, ReachabilityTag } from '@/components/Reachability'
 import { formatDateTime, formatRemaining } from '@/lib/format'
 import { CRA_ARTICLE_14_URL } from '@/lib/regulation'
 
@@ -21,7 +22,7 @@ const STATUS: Record<CraStatus, { kind: NotificationKind; title: string; body: s
   not_required: {
     kind: 'success',
     title: 'No Article 14 notification indicated',
-    body: 'No actively exploited vulnerability or malicious release was found in the dependencies. Vulnerabilities that are not actively exploited do not trigger Article 14 notifications, but should still be fixed.',
+    body: 'No actively exploited vulnerability that the code reaches and no malicious release were found in the dependencies. Vulnerabilities that are not actively exploited do not trigger Article 14 notifications, but should still be fixed.',
   },
 }
 
@@ -38,10 +39,12 @@ const RISK_TONE = {
   PASS: 'success',
 } as const
 
-/** Reports first, then malicious releases, then by CVSS score. */
+const STATUS_RANK: Record<CraStatus, number> = { report_required: 2, review_required: 1, not_required: 0 }
+
+/** Reports first, then reviews, then malicious releases, then by CVSS score. */
 function sortNotifications(notifications: CraNotification[]): CraNotification[] {
   const rank = (n: CraNotification) => [
-    n.status === 'report_required' ? 1 : 0,
+    STATUS_RANK[n.status],
     n.cve.malicious ? 1 : 0,
     n.cve.cvssScore ?? -1,
   ]
@@ -114,18 +117,18 @@ export default function ReportSummary({ report }: { report: CRAReport }) {
                   <Tag tone={category.tone} icon={category.icon}>
                     {category.label}
                   </Tag>
-                  {n.status === 'report_required' ? (
-                    <Tag tone="danger" icon={ShieldAlert}>
-                      Report required
-                    </Tag>
-                  ) : (
-                    <Tag tone="warning" icon={CircleSlash}>
-                      Review required
-                    </Tag>
-                  )}
+                  <StatusTag status={n.status} />
+                  <ReachabilityTag reachability={n.cve.reachability} />
                 </div>
                 <p className="mt-2 text-ink-secondary">{n.reason}</p>
-                <p className="mt-1 text-xs text-ink-helper">{n.legalBasis}</p>
+                <EvidenceList evidence={n.cve.reachability?.evidence ?? []} repoUrl={report.repoUrl} commitSha={report.commitSha} />
+                {n.interpretation && (
+                  <p className="mt-2 flex gap-2 text-xs text-ink-secondary">
+                    <Scale className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                    {n.interpretation}
+                  </p>
+                )}
+                <p className="mt-2 text-xs text-ink-helper">{n.legalBasis}</p>
               </li>
             )
           })}
@@ -158,6 +161,28 @@ export default function ReportSummary({ report }: { report: CRAReport }) {
         />
       </div>
     </div>
+  )
+}
+
+function StatusTag({ status }: { status: CraStatus }) {
+  if (status === 'report_required') {
+    return (
+      <Tag tone="danger" icon={ShieldAlert}>
+        Report required
+      </Tag>
+    )
+  }
+  if (status === 'review_required') {
+    return (
+      <Tag tone="warning" icon={CircleSlash}>
+        Review required
+      </Tag>
+    )
+  }
+  return (
+    <Tag tone="success" icon={CircleCheck}>
+      No notification indicated
+    </Tag>
   )
 }
 

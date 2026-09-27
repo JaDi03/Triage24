@@ -10,6 +10,8 @@ import type {
   CraStatus,
 } from '@/types'
 import { depKey } from '@/lib/dep-key'
+import { buildDrafts } from '@/lib/cra-drafts'
+import { buildRemediations } from '@/lib/remediation'
 
 // ─── SBOM / Policy detection patterns ────────────────────────────────────────
 
@@ -70,18 +72,43 @@ function reviewReason(dep: Dependency): string | null {
   return null
 }
 
+const NOT_REACHABLE_INTERPRETATION =
+  "Treating a vulnerability that the product's code does not reach as not notifiable relies on the definition of " +
+  '"vulnerability" in Art. 3(40) ("can be exploited"). This is an interpretation, not a rule stated in Article 14; ' +
+  'the manufacturer decides.'
+
 function classifyKev(dep: Dependency, cve: CVERecord, kev: KevEntry): CraNotification {
-  const review = reviewReason(dep)
-  return {
-    category: 'actively_exploited_vulnerability',
-    status: review ? 'review_required' : 'report_required',
+  const base = {
+    category: 'actively_exploited_vulnerability' as const,
     dep,
     cve,
     kev,
     legalBasis: LEGAL_BASIS.actively_exploited_vulnerability,
-    reason:
-      review ??
-      `${kev.cveID} is listed in the CISA Known Exploited Vulnerabilities catalog (reliable evidence of active exploitation, Art. 3(42)) and ${dep.name} ${dep.version} is a dependency of the product.`,
+  }
+  const listed = `${kev.cveID} is listed in the CISA Known Exploited Vulnerabilities catalog (reliable evidence of active exploitation, Art. 3(42))`
+  const verdict = cve.reachability?.verdict
+
+  if (verdict === 'not_affected') {
+    return {
+      ...base,
+      status: 'not_required',
+      reason: `${listed}, but the product's code does not reach the vulnerable functionality: ${cve.reachability!.reasoning}`,
+      interpretation: NOT_REACHABLE_INTERPRETATION,
+    }
+  }
+  const review = reviewReason(dep)
+  if (review) return { ...base, status: 'review_required', reason: review }
+  if (verdict === 'affected') {
+    return {
+      ...base,
+      status: 'report_required',
+      reason: `${listed} and the product's code reaches it: ${cve.reachability!.reasoning}`,
+    }
+  }
+  return {
+    ...base,
+    status: 'review_required',
+    reason: `${listed}. ${cve.reachability?.reasoning ?? 'Whether the product reaches it was not analyzed.'} Confirm whether the product is affected.`,
   }
 }
 
@@ -101,7 +128,7 @@ function classifyMalicious(dep: Dependency, cve: CVERecord): CraNotification {
 
 function mostUrgent(notifications: CraNotification[]): CraStatus {
   if (notifications.some((n) => n.status === 'report_required')) return 'report_required'
-  if (notifications.length > 0) return 'review_required'
+  if (notifications.some((n) => n.status === 'review_required')) return 'review_required'
   return 'not_required'
 }
 
@@ -120,6 +147,8 @@ export interface ScoreCRAParams {
   warnings?: string[]
   /** When the manufacturer became aware; defaults to the time of the analysis. */
   awareAt?: Date
+  /** Short commit SHA of the analyzed revision. */
+  commitSha?: string
 }
 
 /**
@@ -159,6 +188,23 @@ export function scoreCRA(params: ScoreCRAParams): CRAReport {
   }
 
   const craStatus = mostUrgent(notifications)
+  const deadlines =
+    craStatus !== 'not_required'
+      ? {
+          awareAt: analyzedAt.toISOString(),
+          earlyWarningDueAt: new Date(analyzedAt.getTime() + 24 * HOUR_MS).toISOString(),
+          notificationDueAt: new Date(analyzedAt.getTime() + 72 * HOUR_MS).toISOString(),
+        }
+      : null
+  const remediations = buildRemediations(cveFindings, new Set(kevById.keys()))
+  const drafts = deadlines
+    ? buildDrafts(notifications, {
+        repoLabel: repoUrl.replace(/^https?:\/\/(www\.)?github\.com\//i, ''),
+        ...(params.commitSha ? { commitSha: params.commitSha } : {}),
+        deadlines,
+        remediations,
+      })
+    : []
 
   // Technical risk: KEV and malicious releases always rank as CRITICAL.
   const severities: Array<CVERecord['severity']> = cveFindings.flatMap((f) => f.cves.map((c) => c.severity))
@@ -169,22 +215,18 @@ export function scoreCRA(params: ScoreCRAParams): CRAReport {
   return {
     reportId: randomUUID(),
     repoUrl,
+    ...(params.commitSha ? { commitSha: params.commitSha } : {}),
     analyzedAt: analyzedAt.toISOString(),
     overallRisk,
     craStatus,
     notifications,
-    deadlines:
-      notifications.length > 0
-        ? {
-            awareAt: analyzedAt.toISOString(),
-            earlyWarningDueAt: new Date(analyzedAt.getTime() + 24 * HOUR_MS).toISOString(),
-            notificationDueAt: new Date(analyzedAt.getTime() + 72 * HOUR_MS).toISOString(),
-          }
-        : null,
+    deadlines,
+    drafts,
+    remediations,
     hasSBOM: hasSBOM(tree),
     hasSecurityPolicy: hasSecurityPolicy(tree),
     disclosureRequired: craStatus === 'report_required',
-    disclosureDeadlineHours: notifications.length > 0 ? 24 : null,
+    disclosureDeadlineHours: deadlines ? 24 : null,
     kevFindings,
     maliciousFindings,
     cveFindings,

@@ -1,4 +1,4 @@
-import type { Dependency, CVERecord } from '@/types'
+import type { AffectedRange, Dependency, CVERecord } from '@/types'
 import { cvss3BaseScore } from '@/lib/cvss'
 import { depKey, hasResolvedVersion } from '@/lib/dep-key'
 
@@ -11,6 +11,8 @@ const MAX_QUERIES_PER_BATCH = 1000
 const MAX_PAGE_ROUNDS = 5
 /** Parallel GET /v1/vulns/{id} requests. */
 const DETAIL_CONCURRENCY = 10
+/** Advisory text kept per finding: enough to name the vulnerable functions. */
+const MAX_DETAILS_LENGTH = 4000
 
 // ─── OSV Request / Response Types ────────────────────────────────────────────
 
@@ -28,10 +30,18 @@ interface OsvSeverity {
   score: string
 }
 
+interface OsvAffected {
+  package?: { name: string; ecosystem: string }
+  ranges?: AffectedRange[]
+  versions?: string[]
+}
+
 interface OsvVuln {
   id: string
   aliases?: string[]
   summary?: string
+  details?: string
+  affected?: OsvAffected[]
   published?: string
   severity?: OsvSeverity[]
   database_specific?: {
@@ -81,8 +91,7 @@ export function buildOsvQuery(deps: Dependency[]): OsvBatchRequest {
       version: dep.version,
       package: {
         name: dep.name,
-        // OSV uses 'npm' and 'Maven'.
-        ecosystem: dep.ecosystem === 'maven' ? 'Maven' : dep.ecosystem,
+        ecosystem: osvEcosystem(dep),
       },
     })),
   }
@@ -236,8 +245,20 @@ function groupByAlias(vulns: OsvVuln[]): OsvVuln[][] {
   return [...groups.values()]
 }
 
-/** Merges the records of one issue into a single finding. */
-function mergeGroup(group: OsvVuln[]): CVERecord {
+function osvEcosystem(dep: Dependency): string {
+  return dep.ecosystem === 'maven' ? 'Maven' : dep.ecosystem
+}
+
+/** The advisory's "affected" entries for this exact package (npm names are case-sensitive, Maven's are not). */
+function affectedEntriesFor(vuln: OsvVuln, dep: Dependency): OsvAffected[] {
+  const normalize = (name: string) => (dep.ecosystem === 'maven' ? name.toLowerCase() : name)
+  return (vuln.affected ?? []).filter(
+    (entry) => entry.package?.ecosystem === osvEcosystem(dep) && normalize(entry.package.name) === normalize(dep.name),
+  )
+}
+
+/** Merges the records of one issue into a single finding for `dep`. */
+function mergeGroup(group: OsvVuln[], dep: Dependency): CVERecord {
   const osvIds = [...new Set(group.map((v) => v.id))].sort()
   const aliases = [...new Set(group.flatMap((v) => [v.id, ...(v.aliases ?? [])]))].sort()
   const cves = aliases.filter((id) => id.startsWith('CVE-'))
@@ -261,6 +282,9 @@ function mergeGroup(group: OsvVuln[]): CVERecord {
     .filter((date): date is string => Boolean(date))
     .sort()[0]
 
+  const entries = group.flatMap((v) => affectedEntriesFor(v, dep))
+  const details = group.map((v) => v.details ?? '').find((text) => text.trim() !== '') ?? ''
+
   return {
     cveId,
     osvIds,
@@ -270,6 +294,9 @@ function mergeGroup(group: OsvVuln[]): CVERecord {
     severity,
     publishedDate: published ?? '',
     malicious: group.some(isMalicious),
+    details: details.slice(0, MAX_DETAILS_LENGTH),
+    affectedRanges: entries.flatMap((entry) => entry.ranges ?? []).filter((range) => range.type !== 'GIT'),
+    affectedVersions: [...new Set(entries.flatMap((entry) => entry.versions ?? []))],
   }
 }
 
@@ -301,7 +328,7 @@ export async function lookupCVEsBatch(deps: Dependency[]): Promise<OsvLookupResu
 
   for (const dep of queryable) {
     const vulns = (idCache.get(depKey(dep)) ?? []).map((id) => detailCache.get(id) ?? { id })
-    byDependency.set(depKey(dep), groupByAlias(vulns).map(mergeGroup))
+    byDependency.set(depKey(dep), groupByAlias(vulns).map((group) => mergeGroup(group, dep)))
   }
 
   return { byDependency, warnings }
